@@ -1,0 +1,28 @@
+/* Eagle Eye Performance Portal - custom styles (layout/colors come from Tailwind classes in index.html) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+body { font-family: 'Inter', sans-serif; }
+
+.bg-eagle-main { background-color: #f3f5f9; }
+.glass-modal { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); }
+
+/* Form inputs */
+.inp { width: 100%; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 0.5rem 0.75rem; outline: none; }
+.inp:focus { box-shadow: 0 0 0 2px #f59e0b; background: #fff; }
+.dark-inp { width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 0.6rem 0.75rem 0.6rem 2.25rem; color: #fff; font-size: 0.875rem; outline: none; }
+.dark-inp:focus { box-shadow: 0 0 0 2px #f59e0b; }
+.lbl { display: block; font-weight: 600; color: #475569; margin-bottom: 0.25rem; }
+
+button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* Daily Log-in Entry: On Track Figure (target) shown beside an input */
+.ot-box { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 0.75rem; padding: 0.45rem 0.75rem; font-weight: 700; color: #3730a3; min-height: 2.3rem; }
+.ot-sub { display: block; font-size: 10px; font-weight: 500; color: #64748b; margin-top: 1px; }
+
+/* Printing the Column Guide only */
+@media print {
+    body.print-guide > *:not(#guideModal) { display: none !important; }
+    body.print-guide #guideModal { position: static !important; background: #fff !important; backdrop-filter: none !important; display: block !important; padding: 0 !important; }
+    body.print-guide .guide-panel { max-height: none !important; overflow: visible !important; box-shadow: none !important; max-width: none !important; }
+    body.print-guide .no-print { display: none !important; }
+}
