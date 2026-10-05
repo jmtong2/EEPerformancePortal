@@ -7,7 +7,7 @@
    ===================================================================== */
 const SUPABASE_URL = '';           // e.g. 'https://abcdefghijkl.supabase.co'   (Project Settings -> Data API -> Project URL)
 const SUPABASE_ANON_KEY = '';      // the "anon" / "publishable" key (safe to share; never the service_role / secret key)
-const SUPABASE_EMAIL_DOMAIN = '';  // leave empty to use USERNAME_EMAIL_DOMAIN; set your company e-mail domain if Supabase says "Email address is invalid"
+const SUPABASE_EMAIL_DOMAIN = '';  // normally leave empty. Only if Supabase says "Email address is invalid": just your company domain, e.g. 'yourcompany.com' (no @). Set it before creating users.
 
 /* ---------- General ---------- */
 const APP_VERSION = 'v7';                                    // "Performance Portal v7" — shown to Admin only
