@@ -77,6 +77,7 @@ function friendlyError(e) {
     if (/invalid login credentials/i.test(m)) return 'Incorrect username or password.';
     if (/email not confirmed/i.test(m)) return 'This login is not confirmed. In Supabase turn OFF "Confirm email" (Authentication → Sign In / Providers → Email).';
     if (/user already registered/i.test(m)) return 'That username is already taken.';
+    if (/unable to validate email address/i.test(m)) return 'Supabase could not accept this login name. Type your username only (no @, no spaces). If it keeps happening, SUPABASE_EMAIL_DOMAIN in js/config.js must be just a domain such as yourcompany.com, or empty.';
     if (/email address .*invalid|email_address_invalid/i.test(m)) return 'Supabase rejected the login e-mail domain. Set SUPABASE_EMAIL_DOMAIN in js/config.js to your company e-mail domain (before creating users).';
     if (/signups? not allowed|signup.*disabled/i.test(m)) return 'In Supabase, turn ON "Allow new users to sign up" (Authentication → Sign In / Providers).';
     if (code === 'PGRST202' || /could not find the function|schema cache|relation .* does not exist|column .* does not exist/i.test(m)) return 'The Supabase database is not set up for v7 yet. Run database/supabase-setup.sql again (docs/SUPABASE-SETUP.md, step 3).';
