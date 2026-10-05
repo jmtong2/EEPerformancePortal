@@ -3,7 +3,20 @@
    Tables are read-only through the API; every change is a database function (RPC) that checks the
    caller's role and runs as one transaction. */
 
-const sbEmail = u => `${String(u).trim().toLowerCase()}@${SUPABASE_EMAIL_DOMAIN || USERNAME_EMAIL_DOMAIN}`;
+// Usernames become placeholder login e-mails (username@domain); no e-mails are ever sent.
+// The domain is cleaned up so common config mistakes ("@company.com", a full e-mail address, "https://…", spaces) still work.
+function sbNormalizeDomain(raw) {
+    const d = String(raw || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^[^@]*@/, '').replace(/[/\s].*$/, '');
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(d))
+        throw new Error(`SUPABASE_EMAIL_DOMAIN in js/config.js looks wrong ("${String(raw).slice(0, 60)}"). Use only a domain such as yourcompany.com (no @, no https://, no spaces), or leave it empty ('').`);
+    return d;
+}
+function sbEmail(username) {
+    const u = String(username || '').trim().toLowerCase();
+    if (u.includes('@')) throw new Error('Type your portal username only (for example jgvillaluz), not an e-mail address.');
+    if (!validUsername(u)) throw new Error('Usernames have 3–30 letters, numbers, dots, dashes or underscores, with no spaces.');
+    return `${u}@${sbNormalizeDomain(SUPABASE_EMAIL_DOMAIN || USERNAME_EMAIL_DOMAIN)}`;
+}
 const SB_COLLECTOR_FIELDS = [ // [app field, database column]
     ['key', 'key'], ['team', 'team'], ['campaign', 'campaign'], ['name', 'name'], ['accs1', 'accs1'], ['collectibles', 'collectibles'],
     ['collection', 'collection'], ['penalty', 'penalty'], ['beginning', 'beginning'], ['principalBal', 'principal_bal'], ['toRetain', 'to_retain'],
