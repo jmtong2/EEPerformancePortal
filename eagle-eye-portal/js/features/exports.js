@@ -1,7 +1,7 @@
 /* Excel and PDF export — Admin only.
    · Excel: always ALL data — INFO, Company Collection / Provision / Repo, Curing, Recovery, TL, OM & AOM, GM,
      Campaign Summary, Entries Log, LEADERS, HOLIDAYS. The file can be imported back (Data → Import Excel):
-     INFO, Curing, Recovery, LEADERS and HOLIDAYS are read; the other sheets are reports.
+     Curing, Recovery, LEADERS and HOLIDAYS are read; the other sheets are reports.
    · PDF: printable report; follows the campaign filter currently selected on the dashboard. */
 
 const frac = (a, b) => (b > 0 ? a / b : 0);
@@ -18,33 +18,33 @@ const METRIC_EXPORT = [
 const METRIC_BY_NAME = Object.fromEntries(METRIC_EXPORT.map(c => [c[0], c]));
 const KPI_EXPORT = ['KPI RATE', i => i.kpiRate / 100, 'pct'];
 const BUCKET_EXPORT = ['BUCKET', i => (i.team === 'recovery' ? 'Recovery' : 'Curing')];
-// Curing / Recovery sheets: every source column, so the file can be imported back.
-const TELE_EXPORT = [['RANK', i => i.assignedRank, 'int'], ['CAMPAIGN', i => i.campaign], BUCKET_EXPORT, ['FULL NAME', i => i.name], ['# ACCS', i => i.accs1, 'int'],
-    METRIC_BY_NAME['COLLECTIBLES'], METRIC_BY_NAME['COLLECTION'], METRIC_BY_NAME['EFF %'], METRIC_BY_NAME['VARIANCE COLLECTION'], METRIC_BY_NAME['PENALTY'], METRIC_BY_NAME['% (vs Collection)'],
-    METRIC_BY_NAME['BEGINNING'], ['PRINCIPAL BAL', i => i.principalBal, 'money'], METRIC_BY_NAME['TO RETAIN'], METRIC_BY_NAME['FIXED PROVISION'], METRIC_BY_NAME['ACH %'], METRIC_BY_NAME['VARIANCE PROVISION'],
-    ['TARGET REPO', i => i.targetRepo, 'units'], METRIC_BY_NAME['REPO'], ['PROVISION OF REPO', i => i.repoProv, 'money'],
-    ['LM COLLECTION', i => i.lmCollection, 'money'], ['LM SAME PERIOD COLLECTION', i => i.lmSpCollection, 'money'],
-    ['LM FIXED PROVISION', i => i.lmFixedProv, 'money'], ['LM SAME PERIOD FIXED PROVISION', i => i.lmSpFixedProv, 'money'],
-    ['LM REPO', i => i.lmRepo, 'int'], ['LM SAME PERIOD REPO', i => i.lmSpRepo, 'int'], KPI_EXPORT];
+// Curing / Recovery sheets: the same columns as Summary_Campaign_Revised.xlsx (so the file can be imported back), plus RANK and KPI RATE.
+// Each "# OF ACCOUNTS" sits right before the figure it counts, like in the source file.
+const TELE_EXPORT = [['RANK', i => i.assignedRank, 'int'], ['CAMPAIGN', i => i.campaign], BUCKET_EXPORT, ['FULL NAME', i => i.name],
+    ['# OF ACCOUNTS', i => i.accs1, 'int'], ['COLLECTIBLES', i => i.collectibles, 'money'], ['COLLECTION', i => i.collection, 'money'], ['PENALTY', i => i.penalty, 'money'],
+    ['SAME PERIOD (COLLECTION)', i => i.lmSpCollection, 'money'],
+    ['# OF ACCOUNTS', i => i.endingAccs, 'int'], ['ENDING', i => i.ending, 'money'], ['# OF ACCOUNTS', i => i.beginningAccs, 'int'], ['BEGINNING', i => i.beginning, 'money'],
+    ['# OF ACCOUNTS', i => i.toRetainAccs, 'int'], ['TO RETAIN', i => optRet(i), 'money'], ['# OF ACCOUNTS', i => i.fixedAccs, 'int'], ['FIXED PROVISION', i => i.fixedProv, 'money'],
+    ['SAME PERIOD (PROVISION)', i => i.lmSpFixedProv, 'money'],
+    ['2nd Month', i => i.repoAge2, 'units'], ['3rd Month', i => i.repoAge3, 'units'], ['4th Month and Up', i => i.repoAge4, 'units'],
+    ['TARGET', i => i.targetRepo, 'units'], ['ACTUAL', i => i.repo, 'int'], ['SAME PERIOD (REPO)', i => i.lmSpRepo, 'units'], KPI_EXPORT];
 const TELE_PDF = [['RANK', i => i.assignedRank, 'int'], ['CAMPAIGN', i => i.campaign], ['FULL NAME', i => i.name], ['# ACCS', i => i.accs1, 'int'], ...METRIC_EXPORT, KPI_EXPORT];
 const LEADER_EXPORT = [['RANK', i => i.assignedRank, 'int'], ['FULL NAME', i => i.name], ['HANDLED CAMPAIGNS', i => i.campaigns.join(', ')], ['# ACCS', i => i.accs1, 'int'], ...METRIC_EXPORT, KPI_EXPORT];
 const CAMPAIGN_EXPORT = [['CAMPAIGN', i => i.name], ['# ACCS', i => i.accs1, 'int'], ...METRIC_EXPORT];
 const ENTRY_EXPORT = [['DATE', e => e.date], ['ENCODED', e => fmtDateTime(e.ts)], ['ENCODED BY', e => e.byName], ['CAMPAIGN', e => e.campaign], BUCKET_EXPORT,
     ['TELECOLLECTOR', e => e.name], ['COLLECTION', e => num(e.collection), 'money'], ['PENALTY', e => num(e.penalty), 'money'],
-    ['FIXED PROVISION', e => num(e.fixedProv), 'money'], ['REPO', e => num(e.repo), 'int'], ['PROVISION OF REPO', e => num(e.repoProv), 'money']];
-const EXCEL_FMT = { money: '#,##0.00', pct: '0.0%', int: '#,##0', units: '#,##0.0' };
+    ['FIXED PROVISION', e => num(e.fixedProv), 'money'], ['REPO', e => num(e.repo), 'int']];
+const EXCEL_FMT = { money: '#,##0.00', pct: '0.0%', int: '#,##0', units: '#,##0.##' };
 
-// Company tab columns (js/ui/company.js) for export: % as fractions; SAME PERIOD split into last month's figure and % change.
+// Company tab columns (js/ui/company.js) for export, % as fractions. Grouped columns get the group name in front (e.g. "AGE 2ND MONTH").
 function coExportCols(tab) {
-    return [['', r => r.label], ...CO_COLS[tab].flatMap(([h, fn, type, unit]) => {
-        if (type === 'sp') return [[`${h} (LAST MONTH)`, r => fn(r.s, r.t).lm, unit === 'money' ? 'money' : 'units'],
-            [`${h} (CHANGE %)`, r => { const v = fn(r.s, r.t), ch = samePeriodChange(v.cur, v.lm); return ch === null ? null : ch / 100; }, 'pct']];
-        if (type === 'pct') return [[h, r => { const v = fn(r.s, r.t); return v === null || v === undefined ? null : v / 100; }, 'pct']];
-        return [[h, r => fn(r.s, r.t), type]];
+    return [['', r => r.label], ...CO_COLS[tab].map(([h, fn, type, group]) => {
+        const head = group ? `${group} ${h}` : h;
+        if (type === 'pct') return [head, r => { const v = fn(r.s, r.t); return v === null || v === undefined ? null : v / 100; }, 'pct'];
+        return [head, r => fn(r.s, r.t), type];
     })];
 }
-const progText = prog => `As of ${dateLabel(prog.asOf)} · business day ${prog.elapsed} of ${prog.total} in ${periodLabel(prog.period)} · TARGET = monthly figure ÷ ${prog.total} × ${prog.elapsed}`;
-
+const progText = prog => `ON TRACK as of ${dateLabel(prog.asOf)} · business day ${prog.elapsed} of ${prog.total} in ${periodLabel(prog.period)} · ON TRACK = monthly figure ÷ ${prog.total} × ${prog.elapsed}`;
 /* ===================== EXCEL ===================== */
 // blocks: [{ title, sub?, cols, rows }] stacked on one sheet (title row, sub/blank row, header row, data rows).
 function excelBlocks(blocks) {
@@ -93,7 +93,7 @@ async function exportExcel() {
             const prog = bdProgress(effectiveAsOf());
             const wb = XLSX.utils.book_new();
             const add = (ws, name) => XLSX.utils.book_append_sheet(wb, ws, name);
-            add(XLSX.utils.aoa_to_sheet([['EAGLE EYE PERFORMANCE PORTAL — DATA EXPORT'], [], ['MONTH', currentPeriod()], ['AS OF DATE', prog.asOf],
+            add(XLSX.utils.aoa_to_sheet([['EAGLE EYE PERFORMANCE PORTAL — DATA EXPORT'], [], ['MONTH', currentPeriod()], ['ON TRACK UP TO', prog.asOf],
                 ['BUSINESS DAYS', `${prog.elapsed} of ${prog.total}`], ['EXPORTED', stamp]]), 'INFO');
             add(excelCompanySheet('co-collection'), 'Company Collection');
             add(excelCompanySheet('co-provision'), 'Company Provision');
@@ -145,10 +145,10 @@ async function exportPDF() {
             doc.autoTable({
                 startY: 82, margin: { left: Mg, right: Mg }, theme: 'grid',
                 styles: { fontSize: 8, cellPadding: 3 }, headStyles: { fillColor: [30, 41, 59], textColor: 255 },
-                head: [['Collectibles', 'Collection', 'Eff %', 'Penalty', '% vs Collection', 'Beginning', 'To Retain', 'Fixed Provision', 'ACH %', 'Repo', 'Last month collection']],
+                head: [['Collectibles', 'Collection', 'Eff %', 'Penalty', '% vs Collection', 'Beginning', 'To Retain', 'Fixed Provision', 'ACH %', 'Repo', 'Same period (collection)']],
                 body: [[fmtNum(totals.collectibles), fmtNum(totals.collection), totals.effRate.toFixed(1) + '%', fmtNum(totals.penalty), totals.penRate.toFixed(1) + '%',
                     fmtNum(totals.beginning), pdfVal(totals.toRetain, 'money'), fmtNum(totals.fixedProv), totals.achRate === null ? '-' : totals.achRate.toFixed(1) + '%',
-                    fmtInt(totals.repo), pdfVal(totals.lmCollection, 'money')]]
+                    fmtInt(totals.repo), pdfVal(totals.lmSpCollection, 'money')]]
             });
 
             const section = (title, cols, rows, color, rowStyle) => {

@@ -35,7 +35,8 @@ function sumOpt(list, field, actualField) {
     return { value: round2(have.reduce((a, i) => a + num(i[field]), 0)), actual: round2(have.reduce((a, i) => a + num(i[actualField]), 0)) };
 }
 function sumStats(list) {
-    const s = { collectibles: 0, collection: 0, penalty: 0, repo: 0, repoProv: 0, beginning: 0, principalBal: 0, fixedProv: 0, accs1: 0 };
+    const s = { collectibles: 0, collection: 0, penalty: 0, repo: 0, repoProv: 0, beginning: 0, principalBal: 0, fixedProv: 0, accs1: 0,
+        ending: 0, endingAccs: 0, beginningAccs: 0, toRetainAccs: 0, fixedAccs: 0, repoAge2: 0, repoAge3: 0, repoAge4: 0 };
     list.forEach(i => Object.keys(s).forEach(k => s[k] += num(i[k])));
     Object.keys(s).forEach(k => s[k] = round2(s[k]));
     const ret = sumOpt(list, 'toRetain', 'fixedProv'), trep = sumOpt(list, 'targetRepo', 'repo');
@@ -55,7 +56,9 @@ function sumStats(list) {
     return s;
 }
 
-// Targets (on-track figures) for a set of totals as of `prog` (from bdProgress).
+// ON TRACK figures for a set of totals as of `prog` (from bdProgress):
+//   Collection = Collectibles ÷ business days in the month × business days up to today (today included)
+//   Provision  = To Retain ÷ business days × elapsed · Repo = monthly TARGET ÷ business days × elapsed
 function targetsFor(s, prog) {
     const r = prog.ratio;
     return {
@@ -77,22 +80,26 @@ function getConsolidatedStats(campaigns) {
     return s;
 }
 
-// Rank by a field (descending). Blank (null) values rank last.
-function getAssignedRanks(list, field = 'kpiRate') {
+// Rank by a field (descending); ties share a rank. Blank (null) values rank last.
+// Rows that fail `rankable` (e.g. no figures yet) get no rank (null, shown as "—") instead of all tying at Rank 1.
+function getAssignedRanks(list, field = 'kpiRate', rankable = () => true) {
     const v = x => (x[field] === null || x[field] === undefined ? -Infinity : x[field]);
-    const sorted = [...list].sort((a, b) => v(b) - v(a));
+    const ranked = list.filter(rankable).sort((a, b) => v(b) - v(a)), rest = list.filter(x => !rankable(x));
     let rank = 1;
-    return sorted.map((x, i) => { if (i > 0 && Math.abs(v(x) - v(sorted[i - 1])) > 0.001) rank = i + 1; return { ...x, assignedRank: rank }; });
+    return ranked.map((x, i) => { if (i > 0 && Math.abs(v(x) - v(ranked[i - 1])) > 0.001) rank = i + 1; return { ...x, assignedRank: rank }; })
+        .concat(rest.map(x => ({ ...x, assignedRank: null })));
 }
+// A KPI Rate of 0 means there are no figures to score yet (e.g. right after Start new month, or a file without numbers).
+const hasKpi = x => x.kpiRate > 0.0001;
 
 /* ---------- ranked lists shared by the dashboard and the Excel / PDF exports ---------- */
 function rankedTeles(team, list = state.collectors) {
-    return getAssignedRanks(list.filter(i => i.team === team).map(i => ({ ...i, kpiRate: calculateKPIRate(i) })));
+    return getAssignedRanks(list.filter(i => i.team === team).map(i => ({ ...i, kpiRate: calculateKPIRate(i) })), 'kpiRate', hasKpi);
 }
 function rankedLeaders(type, campaignFilter = 'ALL') {
     return getAssignedRanks((state.leaders[type] || [])
         .map((l, idx) => ({ idx, name: l.name, campaigns: l.campaigns, ...getConsolidatedStats(l.campaigns) }))
-        .filter(i => campaignFilter === 'ALL' || i.campaigns.includes(campaignFilter)));
+        .filter(i => campaignFilter === 'ALL' || i.campaigns.includes(campaignFilter)), 'kpiRate', hasKpi);
 }
 function campaignStatsList(list = state.collectors) {
     return uniq(list.map(c => c.campaign)).map(name => ({ name, ...sumStats(list.filter(c => c.campaign === name)) }));

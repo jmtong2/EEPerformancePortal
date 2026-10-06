@@ -31,11 +31,10 @@ function bdProgress(asOf) {
 
 function currentPeriod() { return /^\d{4}-\d{2}$/.test(state.currentPeriod || '') ? state.currentPeriod : todayStr().slice(0, 7); }
 
-// The date the month-to-date figures are "as of": the stored as-of date (moved forward by imports and daily entries),
-// otherwise today (or the month's last day when looking at a past month).
+// The day the ON TRACK figures are counted up to: TODAY (today counts as a business day if it is one).
+// For a past month the whole month counts; for a future month nothing has elapsed yet.
 function effectiveAsOf() {
     const p = currentPeriod(), today = todayStr();
-    if (state.asOf && periodOf(state.asOf) === p) return state.asOf;
     if (periodOf(today) === p) return today;
     return today > p ? lastDayOf(p) : p + '-01';
 }

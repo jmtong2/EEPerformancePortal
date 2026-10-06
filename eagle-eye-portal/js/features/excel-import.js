@@ -10,48 +10,60 @@
                    an undo copy of the current data is saved first (Data → Undo).
 
    Understood layouts:
-     · SUMMARY Campaign TEMPLATE.xlsx (v7): INFO (MONTH, AS OF DATE) · Curing / Recovery (one row per telecollector) ·
-       HOLIDAYS (DATE, DESCRIPTION) · LEADERS (TYPE, FULL NAME, HANDLED CAMPAIGNS). README is ignored.
-     · The older "SUMMARY Campaign.xlsx": summary sheets with a CAMPAIGN column (used) and per-campaign sheets
-       with CURRING / RECOVERY blocks (used for cross-checking, or as the data when there are no summary sheets).
-     · Files exported by this portal (Data → Export Excel). */
+     · Summary_Campaign_Revised.xlsx (current): one sheet per campaign (campaign title in A1, e.g. sheet "AFC" titled
+       "Asialink") with a CURING block and a RECOVERY block — COLLECTION / PROVISION (each figure with its own
+       # OF ACCOUNTS) / REPO (2nd Month, 3rd Month, 4th Month and Up, TARGET, ACTUAL) / SAME PERIOD columns —
+       plus "Curing" / "Recovery" summary sheets with a CAMPAIGN column. Filled summary sheets are used and the
+       campaign sheets cross-check them; empty summary sheets are ignored and the campaign sheets are used.
+       VARIANCE columns in the file are not read: the portal computes them.
+     · Older files: SUMMARY Campaign.xlsx, the v7 template (INFO / HOLIDAYS / LEADERS sheets are still read), and
+       files exported by this portal (Data → Export Excel). */
 
+const ACCS_RE = /^((#|NO\.?|NUMBER) ?(OF )?)?(ACCNTS|ACCOUNTS|ACCTS|ACCS)$/;
 const IMPORT_HEADERS = {
     campaign: /^CAMPAIGNS?$/,
     bucket: /^(BUCKET|TEAM|BUCKET \/ TEAM)$/,
     name: /^(FULL ?NAME|NAME|TELECOLLECTOR|TELE ?COLLECTOR|AGENT)$/,
-    accs1: /^((#|NO\.?|NUMBER) ?(OF )?)?(ACCNTS|ACCOUNTS|ACCTS|ACCS)$/,
     collectibles: /^COLLECTIBLES?$/,
     collection: /^COLLECTIONS?$/,
     penalty: /^PENALT(Y|IES)$/,
+    lmSpCollection: /^(SAME PERIOD \(COLLECTION\)|SAME PERIOD COLLECTION|(LM|LAST MONTH) SAME PERIOD COLLECTION)$/,
+    ending: /^(ENDING|ENDING PROVISION)$/,
     beginning: /^(BEGINNING|BEGINNING PROVISION|BEG\.? PROVISION|PROVISION)$/,
-    principalBal: /^PRINCIPAL( BAL\.?| BALANCE)?$/,
     toRetain: /^(TO RETAIN|TO ATTAIN|PROVISION TO RETAIN|RETAIN)$/,
     fixedProv: /^(FIXED PROVISION|PROVISION TO FIXED|PROVISION FIXED|FIXED)$/,
-    targetRepo: /^(TARGET REPO|REPO TARGET|MONTHLY TARGET REPO)$/,
-    repo: /^REPOS?$/,
+    lmSpFixedProv: /^(SAME PERIOD \(PROVISION\)|SAME PERIOD PROVISION|SAME PERIOD FIXED PROVISION|(LM|LAST MONTH) SAME PERIOD FIXED PROVISION)$/,
+    repoAge2: /^2ND MONTH$/,
+    repoAge3: /^3RD MONTH$/,
+    repoAge4: /^4TH MONTH( AND UP| AND ABOVE|\+)?$/,
+    targetRepo: /^(TARGET|TARGET REPO|REPO TARGET|MONTHLY TARGET REPO)$/,
+    repo: /^(REPOS?|ACTUAL|ACTUAL REPO)$/,
+    lmSpRepo: /^(SAME PERIOD \(REPO\)|SAME PERIOD REPO|(LM|LAST MONTH) SAME PERIOD REPO)$/,
+    // older source files
+    principalBal: /^PRINCIPAL( BAL\.?| BALANCE)?$/,
     repoProv: /^(PROVISION OF REPO|REPO PROVISION|PRINCIPAL BAL(\.|ANCE)? PROVISION)$/,
     lmCollection: /^((LM|LAST MONTH) COLLECTION|COMPARISON LAST MONTH)$/,
-    lmSpCollection: /^(LM|LAST MONTH) SAME PERIOD COLLECTION$/,
     lmFixedProv: /^(LM|LAST MONTH) FIXED PROVISION$/,
-    lmSpFixedProv: /^(LM|LAST MONTH) SAME PERIOD FIXED PROVISION$/,
-    lmRepo: /^(LM|LAST MONTH) REPO$/,
-    lmSpRepo: /^(LM|LAST MONTH) SAME PERIOD REPO$/
+    lmRepo: /^(LM|LAST MONTH) REPO$/
 };
+// "# OF ACCOUNTS" appears several times: which figure it counts is decided by the column right after it.
+const ACCS_FOR_NEXT = [['ending', 'endingAccs'], ['beginning', 'beginningAccs'], ['toRetain', 'toRetainAccs'], ['fixedProv', 'fixedAccs']];
 // [field, label, whole number?, optional (blank = not provided)?]
 const IMPORT_NUM_FIELDS = [
-    ['accs1', '# Accounts', true], ['collectibles', 'Collectibles'], ['collection', 'Collection'], ['penalty', 'Penalty'],
-    ['beginning', 'Beginning'], ['principalBal', 'Principal Bal'], ['toRetain', 'To Retain', false, true], ['fixedProv', 'Fixed Provision'],
-    ['targetRepo', 'Target Repo', false, true], ['repo', 'Repo', true], ['repoProv', 'Provision of Repo'],
-    ['lmCollection', 'LM Collection', false, true], ['lmSpCollection', 'LM Same Period Collection', false, true],
-    ['lmFixedProv', 'LM Fixed Provision', false, true], ['lmSpFixedProv', 'LM Same Period Fixed Provision', false, true],
-    ['lmRepo', 'LM Repo', true, true], ['lmSpRepo', 'LM Same Period Repo', true, true]
+    ['accs1', '# of accounts', true], ['collectibles', 'Collectibles'], ['collection', 'Collection'], ['penalty', 'Penalty'],
+    ['lmSpCollection', 'Same Period (Collection)', false, true],
+    ['endingAccs', '# of accounts (Ending)', true], ['ending', 'Ending'], ['beginningAccs', '# of accounts (Beginning)', true], ['beginning', 'Beginning'],
+    ['toRetainAccs', '# of accounts (To Retain)', true], ['toRetain', 'To Retain', false, true],
+    ['fixedAccs', '# of accounts (Fixed Provision)', true], ['fixedProv', 'Fixed Provision'], ['lmSpFixedProv', 'Same Period (Provision)', false, true],
+    ['repoAge2', '2nd Month'], ['repoAge3', '3rd Month'], ['repoAge4', '4th Month and Up'],
+    ['targetRepo', 'Target (repo)', false, true], ['repo', 'Actual (repo)', true], ['lmSpRepo', 'Same Period (Repo)', false, true],
+    ['principalBal', 'Principal Bal'], ['repoProv', 'Provision of Repo'],
+    ['lmCollection', 'LM Collection', false, true], ['lmFixedProv', 'LM Fixed Provision', false, true], ['lmRepo', 'LM Repo', true, true]
 ];
 const IMPORT_FIELDS = IMPORT_NUM_FIELDS.map(f => f[0]);
-const CROSS_FIELDS = ['accs1', 'collectibles', 'collection', 'penalty', 'beginning', 'principalBal', 'fixedProv', 'repo', 'repoProv'];
-const CROSS_LABELS = { accs1: '# accounts', principalBal: 'principal bal', fixedProv: 'fixed provision', repoProv: 'provision of repo' };
+const CROSS_FIELDS = ['accs1', 'collectibles', 'collection', 'penalty', 'ending', 'beginning', 'fixedProv', 'repo'];
+const CROSS_LABELS = { accs1: '# of accounts', fixedProv: 'fixed provision', repo: 'repo (actual)' };
 const SHEET_KIND = [[/^(README|READ ME|INSTRUCTIONS?|HOW TO USE)$/i, 'readme'], [/^INFO$/i, 'info'], [/^HOLIDAYS?$/i, 'holidays'], [/^(LEADERS?|TL ?OM ?GM)$/i, 'leaders']];
-
 let importState = null;
 
 function openImportModal() {
@@ -133,16 +145,31 @@ function importCell(ws, row, col) {
 }
 const importHead = v => typeof v === 'string' ? v.toUpperCase().replace(/\s+/g, ' ').trim() : '';
 function importBucket(text) { const s = importHead(text); return /RECOV/.test(s) ? 'recovery' : /CUR/.test(s) ? 'curing' : null; }
+const headText = v => importHead(v).replace(/\s*\((₱|PHP|PESOS?|ACCOUNTS?|ACCTS|#|COUNT|MONTHLY)\)$/, '').replace(/\s*\*$/, '');
 function importHeaderMap(cells) {
-    const map = {};
-    cells.forEach((v, c) => {
-        const h = importHead(v).replace(/\s*\((₱|PHP|PESOS?|ACCOUNTS?|ACCTS|#|COUNT|MONTHLY)\)$/, '').replace(/\s*\*$/, '');
+    const heads = cells.map(headText), map = {};
+    heads.forEach((h, c) => {
         if (!h) return;
+        if (ACCS_RE.test(h)) {   // "# OF ACCOUNTS": counts the figure in the next column (ENDING, BEGINNING, TO RETAIN, FIXED PROVISION), else accounts
+            const next = heads.slice(c + 1).find(Boolean) || '';
+            const pair = ACCS_FOR_NEXT.find(([f]) => IMPORT_HEADERS[f].test(next));
+            const field = pair ? pair[1] : 'accs1';
+            if (map[field] === undefined) map[field] = c;
+            return;
+        }
         for (const [field, re] of Object.entries(IMPORT_HEADERS)) if (map[field] === undefined && re.test(h)) { map[field] = c; break; }
     });
     return map;
 }
-function sheetKind(name) { const k = SHEET_KIND.find(([re]) => re.test(String(name).trim())); return k ? k[1] : null; }
+// Campaign of a per-campaign sheet: the sheet title (A1, e.g. "Asialink") or the sheet name (e.g. "AFC").
+// A name that matches an existing campaign wins, so "CEPAT" keeps matching campaign CEPAT even if the title says "Cepat Kredit".
+function resolveCampaign(title, sheetName) {
+    const strip = s => cleanName(String(s || '').replace(/RECOVERY|CURRING|CURING/ig, ' '));
+    const cands = [strip(title), strip(sheetName)].filter(c => c && NAME_RE.test(c));
+    const known = uniq([...allCampaigns(), ...leaderCampaigns()]);
+    for (const c of cands) { const k = known.find(x => slug(x) === slug(c)); if (k) return k; }
+    return cands[0] || '';
+}function sheetKind(name) { const k = SHEET_KIND.find(([re]) => re.test(String(name).trim())); return k ? k[1] : null; }
 function sheetGrid(ws, maxRows, maxCols, reader) {
     const range = XLSX.utils.decode_range(ws['!ref']);
     const lastRow = Math.min(range.e.r, range.s.r + maxRows), lastCol = Math.min(range.e.c, maxCols);
@@ -170,13 +197,14 @@ function parseImportWorkbook(wb, r) {
         const rows = sheetGrid(ws, 20000, 80, importCell).map(x => x.cells);
         const firstRow = XLSX.utils.decode_range(ws['!ref']).s.r;
         const sheetGeneric = /^sheet\s*\d*$/i.test(sheetName.trim());
+        const sheetTitle = (rows[0] || []).find(v => typeof v === 'string' && v.trim()) || '';
         let section = null, foundAny = false;
         rows.forEach((cells, i) => {
             const rowNo = firstRow + i + 1;
             const map = importHeaderMap(cells);
             if (map.name !== undefined && map.collectibles !== undefined && map.collection !== undefined) {
                 if (cells.some(v => importHead(v) === 'HANDLED CAMPAIGNS')) { section = null; if (!r.sheetsSkipped.includes(`${sheetName} (leader table)`)) r.sheetsSkipped.push(`${sheetName} (leader table)`); return; }
-                // Bucket: a title in the 3 rows above (e.g. "CURRING", "SOUTH ASIALINK RECOVERY"), else the sheet name.
+                // Bucket: a title in the 3 rows above (e.g. "CURING", "SOUTH ASIALINK RECOVERY"), else the sheet name.
                 let bucket = null, title = '';
                 for (let k = 1; k <= 3 && i - k >= 0 && !bucket; k++) {
                     const t = rows[i - k].find(v => typeof v === 'string' && v.trim());
@@ -186,10 +214,10 @@ function parseImportWorkbook(wb, r) {
                 if (!bucket) bucket = importBucket(sheetName);
                 let campaign = null;
                 if (map.campaign === undefined) {
-                    if (!sheetGeneric) campaign = cleanName(sheetName);
+                    if (!sheetGeneric) campaign = resolveCampaign(sheetTitle, sheetName);
                     else if (title) campaign = cleanName(title.replace(/RECOVERY|CURRING|CURING/ig, '')) || null;
                 }
-                section = { sheet: sheetName, headerRow: rowNo, map, bucket, campaign, consolidated: map.campaign !== undefined, records: [] };
+                section = { sheet: sheetName, title: sheetTitle, headerRow: rowNo, map, bucket, campaign, consolidated: map.campaign !== undefined, records: [] };
                 sections.push(section); foundAny = true;
                 return;
             }
@@ -205,7 +233,9 @@ function parseImportWorkbook(wb, r) {
             }
             if (/^(GRAND )?(SUB ?)?TOTALS?$/.test(importHead(nameText))) return;
             const nonEmpty = cells.filter(v => v !== null && v !== '').length;
-            if (!hasNumbers && nonEmpty === 1 && importBucket(nameText)) return; // block title like "RECOVERY"
+            const textOnly = cells.every(v => v === null || v === '' || typeof v === 'string');
+            // block titles: "RECOVERY" alone, or "RECOVERY | COLLECTION | PROVISION | REPO" group rows
+            if (!hasNumbers && textOnly && ((nonEmpty === 1 && importBucket(nameText)) || /^(CURR?ING|RECOVERY)$/.test(importHead(nameText)))) return;
             totalRows++;
             if (totalRows > IMPORT_MAX_ROWS) return;
             section.records.push(importRowToRecord(section, cells, rowNo));
@@ -214,20 +244,27 @@ function parseImportWorkbook(wb, r) {
     }
     if (totalRows > IMPORT_MAX_ROWS) { r.errors.push(`The file has more than ${IMPORT_MAX_ROWS} telecollector rows.`); r.fatal = true; return; }
 
-    const consolidated = sections.filter(s => s.consolidated);
-    const used = consolidated.length ? consolidated : sections;
-    const cross = consolidated.length ? sections.filter(s => !s.consolidated) : [];
+    // Summary sheets (with a CAMPAIGN column) are used when they have rows; otherwise the per-campaign sheets.
+    const consolidated = sections.filter(s => s.consolidated && s.records.length);
+    sections.filter(s => s.consolidated && !s.records.length).forEach(s => { if (!r.sheetsSkipped.includes(`${s.sheet} (no rows)`)) r.sheetsSkipped.push(`${s.sheet} (no rows)`); });
+    const perCampaign = sections.filter(s => !s.consolidated);
+    const used = consolidated.length ? consolidated : perCampaign;
+    const cross = consolidated.length ? perCampaign : [];
+    // Campaign codes typed in the summary sheets (e.g. "AFC") follow the per-campaign sheet they name.
+    const alias = new Map();
+    perCampaign.forEach(s => { if (s.campaign) [s.sheet, s.title].forEach(a => { if (a) alias.set(slug(cleanName(a)), s.campaign); }); });
+    consolidated.forEach(s => s.records.forEach(rec => { const to = alias.get(slug(rec.campaign)); if (to) rec.campaign = to; }));
     r.records = used.flatMap(s => s.records);
     r.sheetsUsed = uniq(used.map(s => s.sheet));
     r.sheetsCross = uniq(cross.map(s => s.sheet));
+    r.campaignNames = uniq(perCampaign.filter(s => used.includes(s) && s.title && slug(s.campaign) !== slug(s.sheet)).map(s => `${s.sheet} → ${s.campaign}`));
     used.forEach(s => IMPORT_FIELDS.forEach(f => { if (s.map[f] !== undefined) r.present.add(f); }));
     if (!r.records.length) {
-        r.errors.push('No telecollector rows were found. The file needs a header row with FULL NAME, COLLECTIBLES and COLLECTION columns (see the SUMMARY Campaign template).');
+        r.errors.push('No telecollector rows were found. Fill in at least one FULL NAME row under the CURING or RECOVERY header (per-campaign sheets), or in the Curing / Recovery summary sheets.');
         r.fatal = true; return;
     }
     if (cross.length) importCrossCheck(used, cross, r);
 }
-
 function importNumber(v, label, integer, rec, optional) {
     if (v === null || v === '') return optional ? null : 0;
     if (typeof v === 'object' && v.error) { rec.errors.push(`${label} contains ${v.error === 'a date' || v.error === 'TRUE/FALSE' ? v.error : 'an Excel error (' + v.error + ')'}`); return optional ? null : 0; }
@@ -406,10 +443,8 @@ function validateImportRecords(r) {
         if (rec.collectibles > 0 && rec.collection > rec.collectibles) rec.warnings.push('Collection is higher than Collectibles');
         if (rec.toRetain !== null && rec.toRetain > 0 && rec.fixedProv > rec.toRetain) rec.warnings.push('Fixed Provision is higher than To Retain');
         if (rec.penalty > 0 && rec.penalty > rec.collection) rec.warnings.push('Penalty is higher than Collection');
-        if (rec.targetRepo !== null && rec.accs1 > 0 && rec.targetRepo > rec.accs1) rec.warnings.push(`Target Repo (${rec.targetRepo}) is more than # Accounts (${rec.accs1})`);
-        [['lmSpCollection', 'lmCollection'], ['lmSpFixedProv', 'lmFixedProv'], ['lmSpRepo', 'lmRepo']].forEach(([sp, tot]) => {
-            if (rec[sp] !== null && rec[tot] !== null && rec[sp] > rec[tot]) rec.warnings.push(`${IMPORT_NUM_FIELDS.find(f => f[0] === sp)[1]} is higher than ${IMPORT_NUM_FIELDS.find(f => f[0] === tot)[1]}`);
-        });
+        if (rec.targetRepo !== null && rec.accs1 > 0 && rec.targetRepo > rec.accs1) rec.warnings.push(`Repo TARGET (${rec.targetRepo}) is more than # of accounts (${rec.accs1})`);
+        if (rec.toRetainAccs > 0 && rec.fixedAccs > rec.toRetainAccs) rec.warnings.push('# of accounts for Fixed Provision is higher than for To Retain');
         if (!rec.accs1) rec.warnings.push('# Accounts is 0');
         if (!rec.beginning) rec.warnings.push('Beginning is 0');
         if (rec.name && rec.campaign && rec.team) {
@@ -433,11 +468,12 @@ function validateImportRecords(r) {
         x.errors.forEach(e => r.errors.push(`${x.where}${x.name ? ' (' + x.name + ')' : ''}: ${e}`));
         x.warnings.forEach(w => r.warnings.push(`${x.where}${x.name ? ' (' + x.name + ')' : ''}: ${w}`));
     });
+    if ((r.campaignNames || []).length) r.notes.push(`Campaign names taken from the sheets: ${r.campaignNames.join(', ')}.`);
     const missing = (fields, text) => { if (!fields.some(f => r.present.has(f))) r.notes.push(text); };
-    missing(['toRetain'], 'No TO RETAIN column — To Retain stays blank (ACH %, Variance Provision and Target Provision show "—" until the source provides it).');
-    missing(['targetRepo'], 'No TARGET REPO column — Target Repo stays blank.');
-    missing(['principalBal'], 'No PRINCIPAL BAL column — Principal Bal is set to 0.');
-    missing(['lmCollection', 'lmSpCollection', 'lmFixedProv', 'lmSpFixedProv', 'lmRepo', 'lmSpRepo'], 'No last-month (LM) columns — the last-month comparison and SAME PERIOD stay blank (Data → Start new month fills last month\'s totals at month end).');
+    missing(['toRetain'], 'No TO RETAIN column — To Retain stays blank (%, ON TRACK PROVISION and PROVISION VARIANCE show "—").');
+    missing(['targetRepo'], 'No repo TARGET column — the repo TARGET and ON TRACK stay blank.');
+    missing(['ending', 'endingAccs', 'beginningAccs', 'toRetainAccs', 'fixedAccs'], 'No ENDING / # OF ACCOUNTS provision columns — they are set to 0 (use the Summary_Campaign_Revised layout).');
+    missing(['lmSpCollection', 'lmSpFixedProv', 'lmSpRepo'], 'No SAME PERIOD columns — SAME PERIOD and SAME PERIOD VARIANCE stay blank.');
 }
 
 // Month / "as of" date / holidays / leaders from the INFO, HOLIDAYS and LEADERS sheets.
@@ -452,7 +488,7 @@ function validateImportMeta(r) {
         if (!i.month && i.asOf) i.month = periodOf(i.asOf);
         if (!i.monthText && !i.asOfText) r.warnings.push(`${where}: MONTH and AS OF DATE are empty — the portal keeps ${periodLabel(currentPeriod())}.`);
         if (i.month && i.month !== currentPeriod()) r.warnings.push(`This file is for ${periodLabel(i.month)}; the portal is on ${periodLabel(currentPeriod())}. Importing switches the portal to ${periodLabel(i.month)}.`);
-    } else r.notes.push(`No INFO sheet — the month (${periodLabel(currentPeriod())}) and "as of" date stay as they are.`);
+    } else r.notes.push(`The month stays ${periodLabel(currentPeriod())} (change it in Data → Month & holidays).`);
     if (r.holidaySheet && !(r.holidays || []).length) r.warnings.push(`${r.holidaySheet}: no holidays listed — the current holiday list is kept.`);
     if (r.leaders) {
         const camps = new Set(r.records.map(x => x.campaign));
@@ -504,7 +540,7 @@ function renderImportReport(r) {
                 <div class="bg-indigo-50 rounded-xl p-2"><b>Month:</b> ${esc(periodLabel(month))}<br><b>As of:</b> ${asOf ? esc(dateLabel(asOf)) + progText : 'not in the file'}</div>
                 <div class="bg-indigo-50 rounded-xl p-2"><b>Holidays:</b> ${(r.holidays || []).length ? `${r.holidays.length} from the file (replaces the list)` : 'kept as they are'}<br>
                     <b>Leaders:</b> ${L ? `${L.tl.length} TL · ${L.om.length} OM/AOM · ${L.gm.length} GM (replaces the list)` : 'kept as they are'}</div>
-                <div class="bg-indigo-50 rounded-xl p-2"><b>Optional columns found:</b><br>${esc(['toRetain', 'targetRepo', 'principalBal', 'lmCollection', 'lmSpCollection'].filter(f => r.present.has(f)).map(f => IMPORT_NUM_FIELDS.find(x => x[0] === f)[1]).join(', ') || 'none')}</div>
+                <div class="bg-indigo-50 rounded-xl p-2"><b>Optional columns found (blank = not provided):</b><br>${esc(['toRetain', 'targetRepo', 'lmSpCollection', 'lmSpFixedProv', 'lmSpRepo'].filter(f => r.present.has(f)).map(f => IMPORT_NUM_FIELDS.find(x => x[0] === f)[1]).join(', ') || 'none')}</div>
             </div>
             <div class="grid md:grid-cols-3 gap-2 mb-3">
                 <div class="bg-slate-50 rounded-xl p-2"><b>Data taken from:</b><br>${esc(r.sheetsUsed.join(', '))}</div>

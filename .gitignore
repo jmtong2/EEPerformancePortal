@@ -1,0 +1,11 @@
+# Only the portal folder is tracked. Everything else in this folder stays on this PC.
+/*
+!/.gitignore
+!/eagle-eye-portal/
+
+# Never commit Excel files or zips: they can contain personal data (telecollector names and figures).
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.zip

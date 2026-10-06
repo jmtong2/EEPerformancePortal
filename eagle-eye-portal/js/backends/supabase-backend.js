@@ -22,7 +22,10 @@ const SB_COLLECTOR_FIELDS = [ // [app field, database column]
     ['collection', 'collection'], ['penalty', 'penalty'], ['beginning', 'beginning'], ['principalBal', 'principal_bal'], ['toRetain', 'to_retain'],
     ['fixedProv', 'fixed_prov'], ['targetRepo', 'target_repo'], ['repo', 'repo'], ['repoProv', 'repo_prov'],
     ['lmCollection', 'lm_collection'], ['lmSpCollection', 'lm_sp_collection'], ['lmFixedProv', 'lm_fixed_prov'], ['lmSpFixedProv', 'lm_sp_fixed_prov'],
-    ['lmRepo', 'lm_repo'], ['lmSpRepo', 'lm_sp_repo']
+    ['lmRepo', 'lm_repo'], ['lmSpRepo', 'lm_sp_repo'],
+    // v8 (Summary_Campaign_Revised layout)
+    ['ending', 'ending'], ['endingAccs', 'ending_accs'], ['beginningAccs', 'beginning_accs'], ['toRetainAccs', 'to_retain_accs'], ['fixedAccs', 'fixed_accs'],
+    ['repoAge2', 'repo_age2'], ['repoAge3', 'repo_age3'], ['repoAge4', 'repo_age4']
 ];
 const sbToDbCollector = c => Object.fromEntries(SB_COLLECTOR_FIELDS.map(([a, d]) => [d, c[a] === undefined ? null : c[a]]));
 const sbFromDbCollector = r => ({ ...makeCollector(Object.fromEntries(SB_COLLECTOR_FIELDS.map(([a, d]) => [a, r[d]]))), key: r.key });
@@ -59,9 +62,13 @@ const SupabaseBackend = {
         this.url = sbNormalizeUrl(SUPABASE_URL);
         this.key = String(SUPABASE_ANON_KEY).trim();
         await loadScript(LIB.supabase);
-        this.sb = supabase.createClient(this.url, this.key, {
+        this.lib = window.supabase;   // supabase-js (Local mode swaps in its own stand-in, js/backends/local-backend.js)
+        this.sb = this.lib.createClient(this.url, this.key, {
             auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storage: window.sessionStorage, storageKey: 'eeportal-sb-auth' }
         });
+        this.watchAuth();
+    },
+    watchAuth() {
         this.sb.auth.onAuthStateChange((event, session) => {
             if (this.settingUp) return;
             // Supabase advises not to await other Supabase calls inside this callback -> defer.
@@ -70,7 +77,7 @@ const SupabaseBackend = {
     },
     // Separate client without a stored session: creates users / checks passwords without touching the main login.
     second() {
-        if (!this._second) this._second = supabase.createClient(this.url, this.key, {
+        if (!this._second) this._second = this.lib.createClient(this.url, this.key, {
             auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'eeportal-sb-secondary' }
         });
         return this._second;
@@ -143,7 +150,13 @@ const SupabaseBackend = {
         if (error) throw sbError(error);
         state.snapshot = data ? { reason: data.reason, takenAt: num(data.taken_at), takenBy: data.taken_by, counts: data.counts } : null;
     },
-    async fetchAll() { await Promise.all([this.fetchCollectors(), this.fetchConfig(), this.fetchEntries(), this.fetchSnapshot()]); },
+    async fetchResetRequests() {
+        if (!this.isAdminProfile()) { state.resetRequests = []; return; }
+        const { data, error } = await this.sb.from('password_reset_requests').select('*').order('requested_at', { ascending: false }).limit(100);
+        if (error) { state.resetRequests = []; return; }   // table missing until the v8 SQL is run: not fatal
+        state.resetRequests = data.map(r => ({ id: r.id, username: r.username, at: Date.parse(r.requested_at) }));
+    },
+    async fetchAll() { await Promise.all([this.fetchCollectors(), this.fetchConfig(), this.fetchEntries(), this.fetchSnapshot(), this.fetchResetRequests()]); },
     async refresh(...names) { await Promise.all(names.map(n => this['fetch' + n]())); this.onData(); },
 
     /* ---------- realtime ---------- */
@@ -160,7 +173,8 @@ const SupabaseBackend = {
                 this.timers.profile = setTimeout(() => this.onProfileChange(), 300);
             });
         if (this.isEditorProfile()) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: 'entries' }, () => later('Entries'));
-        if (this.isAdminProfile()) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: 'snapshots' }, () => later('Snapshot'));
+        if (this.isAdminProfile()) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: 'snapshots' }, () => later('Snapshot'))
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'password_reset_requests' }, () => later('ResetRequests'));
         this.channel = ch.subscribe(status => setLiveBadge(status === 'SUBSCRIBED'));
     },
     // The Admin changed my role, disabled me or deleted me -> react immediately.
@@ -238,7 +252,11 @@ const SupabaseBackend = {
         await this.rpc('admin_update_user', { p_uid: uid, p_role: patch.role !== undefined ? patch.role : null, p_active: patch.active !== undefined ? patch.active : null });
     },
     async deleteUser(uid) { await this.rpc('admin_delete_user', { p_uid: uid }); },
-    async resetUserPassword(uid, pw) { await this.rpc('admin_set_password', { p_uid: uid, p_password: pw }); },
+    async resetUserPassword(uid, pw) { await this.rpc('admin_set_password', { p_uid: uid, p_password: pw }); await this.refresh('ResetRequests'); },
+
+    /* ---------- forgot password: a request the Admin sees under Users ---------- */
+    async requestPasswordReset(username) { await this.rpc('request_password_reset', { p_username: String(username || '').trim().toLowerCase() }); },
+    async dismissResetRequest(id) { await this.rpc('admin_dismiss_reset_request', { p_id: id }); await this.refresh('ResetRequests'); },
 
     /* ---------- daily entries ---------- */
     async addDailyEntry(e) {

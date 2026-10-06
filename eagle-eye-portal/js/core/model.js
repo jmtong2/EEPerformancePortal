@@ -7,7 +7,7 @@ let Backend = null; // SupabaseBackend (set in app.js)
 
 function emptyState() {
     return { campaigns: [], collectors: [], leaders: { tl: [], om: [], gm: [] }, entries: [], kpi: null, lastImportAt: 0, snapshot: null,
-        currentPeriod: null, asOf: null, holidays: [] };
+        currentPeriod: null, asOf: null, holidays: [], resetRequests: [] };
 }
 
 /* ---------- roles ---------- */
@@ -28,18 +28,25 @@ function collectorKey(campaign, team, name) { return `${slug(campaign)}__${team}
 // Optional number: blank / missing -> null (shown as "—"), otherwise rounded to 2 decimals.
 const optNum = v => (v === null || v === undefined || v === '' ? null : (isFinite(parseFloat(v)) ? round2(parseFloat(v)) : null));
 // Fields that may legitimately be blank until the source file provides them.
+//   lmSp* = SAME PERIOD figures (last month at the same point of the month). The other lm* / principalBal / repoProv
+//   fields are from v7 sources; they are kept in the database but no longer shown.
 const OPTIONAL_FIELDS = ['toRetain', 'targetRepo', 'lmCollection', 'lmSpCollection', 'lmFixedProv', 'lmSpFixedProv', 'lmRepo', 'lmSpRepo'];
 
 function makeCollector(o) {
     const team = o.team === 'recovery' ? 'recovery' : 'curing';
     const campaign = cleanName(o.campaign), name = cleanName(o.name);
+    const int = v => Math.trunc(num(v)), amt = v => round2(num(v));
     return {
         key: collectorKey(campaign, team, name), team, campaign, name,
-        accs1: Math.trunc(num(o.accs1)), collectibles: round2(num(o.collectibles)), collection: round2(num(o.collection)), penalty: round2(num(o.penalty)),
-        beginning: round2(num(o.beginning)), principalBal: round2(num(o.principalBal)), toRetain: optNum(o.toRetain),
-        fixedProv: round2(num(o.fixedProv)), targetRepo: optNum(o.targetRepo), repo: Math.trunc(num(o.repo)), repoProv: round2(num(o.repoProv)),
-        lmCollection: optNum(o.lmCollection), lmSpCollection: optNum(o.lmSpCollection), lmFixedProv: optNum(o.lmFixedProv),
-        lmSpFixedProv: optNum(o.lmSpFixedProv), lmRepo: optNum(o.lmRepo), lmSpRepo: optNum(o.lmSpRepo)
+        // COLLECTION
+        accs1: int(o.accs1), collectibles: amt(o.collectibles), collection: amt(o.collection), penalty: amt(o.penalty), lmSpCollection: optNum(o.lmSpCollection),
+        // PROVISION: each figure has its own # of accounts
+        endingAccs: int(o.endingAccs), ending: amt(o.ending), beginningAccs: int(o.beginningAccs), beginning: amt(o.beginning),
+        toRetainAccs: int(o.toRetainAccs), toRetain: optNum(o.toRetain), fixedAccs: int(o.fixedAccs), fixedProv: amt(o.fixedProv), lmSpFixedProv: optNum(o.lmSpFixedProv),
+        // REPO: by age (2nd month, 3rd month, 4th month and up), monthly TARGET, ACTUAL (= repo)
+        repoAge2: amt(o.repoAge2), repoAge3: amt(o.repoAge3), repoAge4: amt(o.repoAge4), targetRepo: optNum(o.targetRepo), repo: int(o.repo), lmSpRepo: optNum(o.lmSpRepo),
+        // kept for older data
+        principalBal: amt(o.principalBal), repoProv: amt(o.repoProv), lmCollection: optNum(o.lmCollection), lmFixedProv: optNum(o.lmFixedProv), lmRepo: optNum(o.lmRepo)
     };
 }
 
@@ -50,23 +57,30 @@ function dedupeCollectors(list) {
         const c = makeCollector(raw), ex = map.get(c.key);
         if (!ex) { map.set(c.key, c); return; }
         merged++;
-        ['collection', 'penalty', 'repo', 'repoProv'].forEach(k => ex[k] += c[k]);
-        ['accs1', 'collectibles', 'beginning', 'principalBal', 'fixedProv'].forEach(k => ex[k] = Math.max(ex[k], c[k]));
+        ['collection', 'penalty', 'repo', 'repoProv', 'repoAge2', 'repoAge3', 'repoAge4'].forEach(k => ex[k] += c[k]);
+        ['accs1', 'collectibles', 'beginning', 'beginningAccs', 'ending', 'endingAccs', 'toRetainAccs', 'fixedAccs', 'principalBal', 'fixedProv'].forEach(k => ex[k] = Math.max(ex[k], c[k]));
         OPTIONAL_FIELDS.forEach(k => { if (ex[k] === null) ex[k] = c[k]; });
     });
     return { list: [...map.values()], merged };
 }
 
 /* ---------- sanitising anything that comes from the database or imports ---------- */
+// KPI settings from the database; anything missing or invalid falls back to DEFAULT_KPI (the standard targets and weights).
+// (A missing weight must NOT count as 0 — that made every KPI Rate 0% and put everyone at Rank 1.)
 function sanitizeKpi(k) {
-    const d = DEFAULT_KPI, out = { cap: num(k && k.cap) >= 100 && num(k && k.cap) <= 200 ? num(k.cap) : d.cap };
+    const d = DEFAULT_KPI, given = v => v !== null && v !== undefined && v !== '' && isFinite(Number(v));
+    const cap = k && given(k.cap) ? Number(k.cap) : NaN;
+    const out = { cap: cap >= 100 && cap <= 200 ? cap : d.cap };
     ['curing', 'recovery'].forEach(t => {
         out[t] = { weights: {}, targets: {} };
+        const src = k && k[t] ? k[t] : {};
         ['collection', 'penalty', 'provision', 'repo'].forEach(p => {
-            const w = num(k && k[t] && k[t].weights && k[t].weights[p]), g = num(k && k[t] && k[t].targets && k[t].targets[p]);
+            const w = src.weights && given(src.weights[p]) ? Number(src.weights[p]) : NaN;
+            const g = src.targets && given(src.targets[p]) ? Number(src.targets[p]) : NaN;
             out[t].weights[p] = w >= 0 && w <= 100 ? w : d[t].weights[p];
             out[t].targets[p] = g > 0 && g <= 100 ? g : d[t].targets[p];
         });
+        if (!Object.values(out[t].weights).some(w => w > 0)) out[t].weights = { ...d[t].weights };   // all-zero weights are never valid
     });
     return out;
 }

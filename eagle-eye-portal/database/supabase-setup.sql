@@ -1,8 +1,8 @@
 -- =====================================================================
--- Eagle Eye Performance Portal v7 — Supabase database setup / upgrade
+-- Eagle Eye Performance Portal v8 — Supabase database setup / upgrade
 -- Run in: Supabase Dashboard -> SQL Editor -> New query -> paste ALL of this -> Run.
 --   · New project      : creates everything.
---   · Existing project : upgrades it in place to v7 and keeps your data.
+--   · Existing project : upgrades it in place to v8 and keeps your data.
 -- Safe to run again at any time; it never deletes data.
 --
 -- Roles (profiles.role):
@@ -55,6 +55,15 @@ alter table public.collectors add column if not exists lm_sp_fixed_prov numeric(
 alter table public.collectors add column if not exists lm_repo          numeric(12,2) check (lm_repo >= 0);
 alter table public.collectors add column if not exists lm_sp_repo       numeric(12,2) check (lm_sp_repo >= 0);
 alter table public.collectors alter column to_retain drop not null;   -- v7: To Retain may be blank
+-- v8 columns (Summary_Campaign_Revised layout): each provision figure has its own # of accounts; repo by age
+alter table public.collectors add column if not exists ending         numeric(16,2) not null default 0 check (ending >= 0);
+alter table public.collectors add column if not exists ending_accs    integer not null default 0 check (ending_accs >= 0);
+alter table public.collectors add column if not exists beginning_accs integer not null default 0 check (beginning_accs >= 0);
+alter table public.collectors add column if not exists to_retain_accs integer not null default 0 check (to_retain_accs >= 0);
+alter table public.collectors add column if not exists fixed_accs     integer not null default 0 check (fixed_accs >= 0);
+alter table public.collectors add column if not exists repo_age2      numeric(12,2) not null default 0 check (repo_age2 >= 0);
+alter table public.collectors add column if not exists repo_age3      numeric(12,2) not null default 0 check (repo_age3 >= 0);
+alter table public.collectors add column if not exists repo_age4      numeric(12,2) not null default 0 check (repo_age4 >= 0);
 alter table public.collectors alter column to_retain drop default;
 
 create table if not exists public.config (
@@ -111,6 +120,13 @@ create table if not exists public.baseline (
   saved_at bigint not null
 );
 
+-- "Forgot password?" requests from the login screen (the Admin sees them under Users). Readable by Admins only.
+create table if not exists public.password_reset_requests (
+  id           uuid primary key default gen_random_uuid(),
+  username     text not null unique check (username ~ '^[a-z0-9._-]{3,30}$'),
+  requested_at timestamptz not null default now()
+);
+
 -- ========================== ONE-TIME v7 UPGRADE ==========================
 -- Clears To Retain (it will come from the new source) and seeds the 2026 Philippine holidays once.
 do $$
@@ -137,6 +153,16 @@ begin
       ]'::jsonb else holidays end,
       schema_version = 7
     where id = 1;
+  end if;
+end $$;
+
+-- ========================== ONE-TIME v8 UPGRADE ==========================
+-- KPI Rate back to the standard targets and weights (Collection 40%/35 & 40%/30, Penalty 10%/30 & 6%/25,
+-- Provision 55%/25 & 70%/35, Repo 2%/10 & 2%/10 for Curing & Recovery).
+do $$
+begin
+  if coalesce((select schema_version from public.config where id = 1), 0) < 8 then
+    update public.config set kpi = null, schema_version = 8 where id = 1;
   end if;
 end $$;
 
@@ -206,9 +232,10 @@ create or replace function public.admin_set_password(p_uid uuid, p_password text
 language plpgsql security definer set search_path = public, extensions as $$
 begin
   if not is_admin() then raise exception 'Only the Admin can reset passwords'; end if;
-  if char_length(coalesce(p_password, '')) < 8 then raise exception 'Password must be at least 8 characters'; end if;
+  if char_length(coalesce(p_password, '')) < 6 then raise exception 'Password must be at least 6 characters'; end if;
   update auth.users set encrypted_password = extensions.crypt(p_password, extensions.gen_salt('bf')), updated_at = now() where id = p_uid;
   if not found then raise exception 'User not found'; end if;
+  delete from password_reset_requests where username = (select username from profiles where id = p_uid);   -- request handled
 end $$;
 
 -- ========================== INTERNAL HELPERS (not callable from browsers) ==========================
@@ -218,10 +245,13 @@ language plpgsql security definer set search_path = public as $$
 begin
   insert into collectors (key, team, campaign, name, accs1, collectibles, collection, penalty, beginning, principal_bal, to_retain,
                           fixed_prov, target_repo, repo, repo_prov, lm_collection, lm_sp_collection, lm_fixed_prov, lm_sp_fixed_prov,
-                          lm_repo, lm_sp_repo, updated_at, updated_by)
+                          lm_repo, lm_sp_repo, ending, ending_accs, beginning_accs, to_retain_accs, fixed_accs, repo_age2, repo_age3, repo_age4,
+                          updated_at, updated_by)
   select r.key, r.team, r.campaign, r.name, coalesce(r.accs1, 0), coalesce(r.collectibles, 0), coalesce(r.collection, 0), coalesce(r.penalty, 0),
          coalesce(r.beginning, 0), coalesce(r.principal_bal, 0), r.to_retain, coalesce(r.fixed_prov, 0), r.target_repo, coalesce(r.repo, 0),
          coalesce(r.repo_prov, 0), r.lm_collection, r.lm_sp_collection, r.lm_fixed_prov, r.lm_sp_fixed_prov, r.lm_repo, r.lm_sp_repo,
+         coalesce(r.ending, 0), coalesce(r.ending_accs, 0), coalesce(r.beginning_accs, 0), coalesce(r.to_retain_accs, 0), coalesce(r.fixed_accs, 0),
+         coalesce(r.repo_age2, 0), coalesce(r.repo_age3, 0), coalesce(r.repo_age4, 0),
          now(), coalesce(p_who, r.updated_by)
     from jsonb_populate_recordset(null::public.collectors, coalesce(p_rows, '[]'::jsonb)) r
   on conflict (key) do update set
@@ -230,7 +260,9 @@ begin
      to_retain = excluded.to_retain, fixed_prov = excluded.fixed_prov, target_repo = excluded.target_repo, repo = excluded.repo,
      repo_prov = excluded.repo_prov, lm_collection = excluded.lm_collection, lm_sp_collection = excluded.lm_sp_collection,
      lm_fixed_prov = excluded.lm_fixed_prov, lm_sp_fixed_prov = excluded.lm_sp_fixed_prov, lm_repo = excluded.lm_repo,
-     lm_sp_repo = excluded.lm_sp_repo, updated_at = now(), updated_by = excluded.updated_by;
+     lm_sp_repo = excluded.lm_sp_repo, ending = excluded.ending, ending_accs = excluded.ending_accs, beginning_accs = excluded.beginning_accs,
+     to_retain_accs = excluded.to_retain_accs, fixed_accs = excluded.fixed_accs, repo_age2 = excluded.repo_age2, repo_age3 = excluded.repo_age3,
+     repo_age4 = excluded.repo_age4, updated_at = now(), updated_by = excluded.updated_by;
 end $$;
 
 create or replace function public._current_data() returns jsonb
@@ -483,10 +515,32 @@ begin
   update collectors set
     lm_collection = collection, lm_fixed_prov = fixed_prov, lm_repo = repo,
     lm_sp_collection = null, lm_sp_fixed_prov = null, lm_sp_repo = null,
-    collection = 0, penalty = 0, fixed_prov = 0, repo = 0, repo_prov = 0, updated_at = now()
+    collection = 0, penalty = 0, fixed_prov = 0, fixed_accs = 0, repo = 0, repo_prov = 0, repo_age2 = 0, repo_age3 = 0, repo_age4 = 0, updated_at = now()
   where true;
   update config set current_period = v_next, as_of = null, last_import_at = floor(extract(epoch from clock_timestamp()) * 1000)::bigint where id = 1;
   return v_next;
+end $$;
+
+-- ========================== FORGOT PASSWORD ==========================
+-- Anyone (also before logging in) may ask the Admin for a new password. The answer is the same whether or not the
+-- username exists, one request per username is kept, and at most 100 are stored.
+create or replace function public.request_password_reset(p_username text) returns void
+language plpgsql security definer set search_path = public as $$
+declare u text := lower(trim(coalesce(p_username, '')));
+begin
+  if u !~ '^[a-z0-9._-]{3,30}$' then return; end if;
+  if not exists (select 1 from profiles where username = u) then return; end if;
+  if (select count(*) from password_reset_requests) >= 100 then return; end if;
+  insert into password_reset_requests (username) values (u)
+  on conflict (username) do update set requested_at = now();
+end $$;
+grant execute on function public.request_password_reset(text) to anon, authenticated;
+
+create or replace function public.admin_dismiss_reset_request(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'Only the Admin can manage password requests'; end if;
+  delete from password_reset_requests where id = p_id;
 end $$;
 
 -- ========================== ROW LEVEL SECURITY ==========================
@@ -497,6 +551,7 @@ alter table public.entries       enable row level security;
 alter table public.snapshots     enable row level security;
 alter table public.snapshot_data enable row level security;
 alter table public.baseline      enable row level security;
+alter table public.password_reset_requests enable row level security;
 
 -- Read access only. There are deliberately NO insert/update/delete policies: all changes go through the functions above.
 drop policy if exists profiles_select   on public.profiles;
@@ -509,10 +564,12 @@ create policy collectors_select on public.collectors for select using (is_active
 create policy config_select     on public.config     for select using (is_active());
 create policy entries_select    on public.entries    for select using (is_editor());   -- Analysts cannot see the entries log
 create policy snapshots_select  on public.snapshots  for select using (is_admin());    -- undo info: Admin only
+drop policy if exists reset_requests_select on public.password_reset_requests;
+create policy reset_requests_select on public.password_reset_requests for select using (is_admin());
 -- snapshot_data and baseline: no policy at all -> never readable through the API
 
 revoke insert, update, delete, truncate on public.profiles, public.collectors, public.config, public.entries,
-       public.snapshots, public.snapshot_data, public.baseline from anon, authenticated;
+       public.snapshots, public.snapshot_data, public.baseline, public.password_reset_requests from anon, authenticated;
 revoke select on public.snapshot_data, public.baseline from anon, authenticated;
 
 -- ========================== REALTIME (live updates on every PC) ==========================
@@ -523,4 +580,5 @@ begin
   begin alter publication supabase_realtime add table public.entries;    exception when duplicate_object or undefined_object then null; end;
   begin alter publication supabase_realtime add table public.snapshots;  exception when duplicate_object or undefined_object then null; end;
   begin alter publication supabase_realtime add table public.profiles;   exception when duplicate_object or undefined_object then null; end;
+  begin alter publication supabase_realtime add table public.password_reset_requests; exception when duplicate_object or undefined_object then null; end;
 end $$;

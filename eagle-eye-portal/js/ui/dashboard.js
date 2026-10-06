@@ -3,7 +3,8 @@
 
 const TD = 'py-3 px-3';
 const ROW = 'border-b border-slate-100 hover:bg-slate-50/80 text-xs transition';
-const rankBadge = r => r === 1 ? '👑 Rank 1' : `Rank ${r}`;
+// No rank (null) = no figures to score yet.
+const rankBadge = r => (r === null || r === undefined ? '<span class="text-slate-400 font-semibold">—</span>' : r === 1 ? '👑 Rank 1' : `Rank ${r}`);
 
 const TABS = [
     ['all', 'fa-layer-group', '', 'All Telecollectors'], ['curing', 'fa-heart-pulse', 'text-amber-600', 'Curing Teles'],
@@ -103,6 +104,8 @@ function renderDashboard() {
         b.classList.toggle('text-slate-600', !on); b.classList.toggle('hover:bg-slate-100', !on);
     });
     if (!$('dataMenu').classList.contains('hidden')) renderDataMenu();
+    renderResetBadge();
+    if (!$('usersModal').classList.contains('hidden')) renderResetRequests();
 
     const sel = $('campaignFilterSelect'), prev = sel.value || 'ALL';
     sel.innerHTML = `<option value="ALL">ALL CAMPAIGNS UNIFIED</option>` + allCampaigns().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
@@ -155,19 +158,20 @@ function renderCards(filtered) {
     $('cardRepoRate').innerText = `${pct(t.repo, t.accs1).toFixed(1)}% of ${fmtInt(t.accs1)} accounts`;
 }
 
-// Upper-right card: last month's total collection for the current filter, compared with this month so far.
+// Upper-right card: SAME PERIOD collection (last month at the same point of the month) for the current filter,
+// compared with this month so far.
 function renderLastMonthCard(filtered) {
     const s = sumStats(filtered);
     $('lmCardPeriod').innerText = periodLabel(shiftPeriod(currentPeriod(), -1));
-    if (s.lmCollection === null) {
+    if (s.lmSpCollection === null) {
         $('lmCardValue').innerHTML = DASH;
-        $('lmCardSub').innerText = 'Not in the data yet (LM COLLECTION column, or Data → Start new month).';
+        $('lmCardSub').innerText = 'Not in the data yet (SAME PERIOD (COLLECTION) column of the Excel file).';
         return;
     }
-    $('lmCardValue').innerText = formatPHP(s.lmCollection);
-    const sp = samePeriodChange(s.collectionForSp, s.lmSpCollection);
-    $('lmCardSub').innerHTML = `This month so far: <b>${formatPHP(s.collectionForLm)}</b> (${pct(s.collectionForLm, s.lmCollection).toFixed(1)}% of last month)` +
-        (sp === null ? '' : `<br>vs same period last month: <b class="${sp >= 0 ? 'text-emerald-700' : 'text-rose-600'}"><i class="fa-solid ${sp >= 0 ? 'fa-caret-up' : 'fa-caret-down'}"></i> ${Math.abs(sp).toFixed(1)}%</b>`);
+    $('lmCardValue').innerText = formatPHP(s.lmSpCollection);
+    const v = s.collectionForSp - s.lmSpCollection, ch = samePeriodChange(s.collectionForSp, s.lmSpCollection);
+    $('lmCardSub').innerHTML = `This month so far: <b>${formatPHP(s.collectionForSp)}</b><br>SAME PERIOD VARIANCE: <b class="${v >= 0 ? 'text-emerald-700' : 'text-rose-600'}">` +
+        `<i class="fa-solid ${v >= 0 ? 'fa-caret-up' : 'fa-caret-down'}"></i> ${formatPHP(v)}${ch === null ? '' : ` (${ch >= 0 ? '+' : ''}${ch.toFixed(1)}%)`}</b>`;
 }
 
 function renderTeleTable(team, filtered, color) {
@@ -253,9 +257,8 @@ function renderEntries(q, camp) {
         <td class="${TD} font-semibold text-rose-600">${formatPHP(e.penalty)}</td>
         <td class="${TD} font-semibold text-emerald-700">${fmtNum(e.fixedProv)}</td>
         <td class="${TD} text-center font-bold text-indigo-600">${num(e.repo)}</td>
-        <td class="${TD} font-semibold text-slate-700">${formatPHP(e.repoProv)}</td>
         <td class="${TD} text-center">${entryUndoable(e)
             ? `<button onclick="handleDeleteEntry('${esc(e.id)}')" class="bg-rose-50 hover:bg-rose-100 text-rose-600 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-rotate-left"></i> Undo</button>`
             : '<span class="text-[10px] text-slate-400">Before last import</span>'}</td>
-    </tr>`).join('') || `<tr><td colspan="12" class="py-6 text-center text-xs text-slate-400">No daily entries yet.</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="11" class="py-6 text-center text-xs text-slate-400">No daily entries yet.</td></tr>`;
 }

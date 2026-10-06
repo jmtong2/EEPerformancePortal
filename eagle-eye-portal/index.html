@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Eagle Eye Business & Collection Services - Performance Portal</title>
+    <link rel="icon" type="image/png" href="img/favicon.png">
 
     <!-- Libraries -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -31,13 +32,11 @@
             <div class="absolute -top-10 -right-10 w-32 h-32 bg-amber-500/20 rounded-full blur-2xl"></div>
             <div class="absolute -bottom-10 -left-10 w-32 h-32 bg-blue-500/20 rounded-full blur-2xl"></div>
             <div class="text-center mb-6 relative z-10">
-                <div class="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-amber-500/30">
-                    <i class="fa-solid font-bold text-3xl text-slate-900 fa-dove"></i>
-                </div>
+                <img src="img/logo.png" alt="Eagle Eye" class="w-20 h-20 object-contain mx-auto mb-3 drop-shadow-lg">
                 <h2 class="text-2xl font-bold tracking-tight">Eagle Eye Performance Portal</h2>
                 <p id="authSubtitle" class="text-xs text-amber-400 font-semibold uppercase tracking-wider mt-1">Authentication Required</p>
             </div>
-            <div id="authConnecting" class="text-center text-sm text-slate-400 relative z-10 hidden"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Connecting to cloud…</div>
+            <div id="authConnecting" class="text-center text-sm text-slate-400 relative z-10 hidden"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> <span id="authConnectingText">Connecting to cloud…</span></div>
             <div id="loginError" class="text-red-400 text-xs mb-3 relative z-10 hidden"><i class="fa-solid fa-circle-exclamation"></i> <span id="loginErrorText"></span></div>
 
             <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-4 relative z-10">
@@ -52,17 +51,39 @@
                         <input type="password" id="loginPassword" required autocomplete="current-password" class="dark-inp" placeholder="Enter password"></div>
                 </div>
                 <button type="submit" id="loginBtn" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-bold py-3 rounded-xl shadow-lg shadow-amber-500/20 transition active:scale-95">Access Portal</button>
+                <p class="text-center"><button type="button" onclick="openForgotModal()" class="text-xs text-amber-400 hover:text-amber-300 font-semibold underline-offset-2 hover:underline">Forgot password?</button></p>
+                <p id="localModeHint" class="text-[11px] text-slate-500 text-center hidden"><i class="fa-solid fa-laptop"></i> Local mode · data is saved in this browser on this PC only.</p>
             </form>
 
             <form id="setupForm" onsubmit="handleSetup(event)" class="space-y-4 relative z-10 hidden">
-                <p class="text-xs text-slate-300 bg-slate-800/70 border border-slate-700 rounded-xl p-3">
+                <p id="setupIntro" class="text-xs text-slate-300 bg-slate-800/70 border border-slate-700 rounded-xl p-3">
                     <i class="fa-solid fa-cloud text-amber-400"></i> This cloud database is empty. Create the first <b>Admin</b> account. After logging in, load the data with <b>Data → Import Excel file</b>.
                 </p>
                 <div class="relative"><i class="fa-solid fa-user absolute left-3 top-3 text-slate-500 text-sm"></i><input type="text" id="setupUsername" required class="dark-inp" placeholder="Admin username (e.g. jgvillaluz)"></div>
                 <div class="relative"><i class="fa-solid fa-id-card absolute left-3 top-3 text-slate-500 text-sm"></i><input type="text" id="setupDisplayName" required class="dark-inp" placeholder="Display name"></div>
-                <div class="relative"><i class="fa-solid fa-lock absolute left-3 top-3 text-slate-500 text-sm"></i><input type="password" id="setupPassword" required minlength="8" class="dark-inp" placeholder="Password (min 8 characters)"></div>
+                <div class="relative"><i class="fa-solid fa-lock absolute left-3 top-3 text-slate-500 text-sm"></i><input type="password" id="setupPassword" required minlength="6" class="dark-inp" placeholder="Password (min 6 characters)"></div>
                 <div id="setupError" class="text-red-400 text-xs hidden"></div>
                 <button type="submit" id="setupBtn" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-3 rounded-xl">Create Admin Account</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Forgot password (from the login screen): sends a reset request to the Admin -->
+    <div id="forgotModal" class="fixed inset-0 z-[60] flex items-center justify-center glass-modal p-4 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                <h3 class="font-bold text-base flex items-center gap-2"><i class="fa-solid fa-unlock-keyhole text-amber-500"></i> Forgot password?</h3>
+                <button onclick="hideModal('forgotModal')" class="text-slate-400 hover:text-slate-700"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <form onsubmit="handleForgotPassword(event)" class="space-y-3 text-xs">
+                <p class="text-slate-600">Passwords are reset by the <b>Admin</b>. Send a request: the Admin sees it under <b>Users</b>, sets a new password and gives it to you.</p>
+                <div><label class="lbl">Your username</label><input id="forgotUsername" required autocomplete="username" class="inp" placeholder="e.g. jgvillaluz"></div>
+                <div id="forgotResult" class="hidden rounded-xl p-3 text-[11px] font-semibold"></div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="hideModal('forgotModal')" class="px-4 py-2 bg-slate-100 text-slate-700 font-semibold rounded-xl">Close</button>
+                    <button type="submit" id="forgotBtn" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl">Send request to Admin</button>
+                </div>
+                <p class="text-[11px] text-slate-500 border-t border-slate-100 pt-2"><b>An Admin forgot their own password?</b> Another Admin can reset it under Users. <span id="forgotAdminTip"></span></p>
             </form>
         </div>
     </div>
@@ -92,8 +113,8 @@
             </div>
             <form onsubmit="handleChangePassword(event)" class="space-y-3 text-xs">
                 <div><label class="lbl">Current Password</label><input type="password" id="currentPassInput" required class="inp"></div>
-                <div><label class="lbl">New Password (min 8 characters)</label><input type="password" id="newPassInput" required minlength="8" class="inp"></div>
-                <div><label class="lbl">Confirm New Password</label><input type="password" id="confirmPassInput" required minlength="8" class="inp"></div>
+                <div><label class="lbl">New Password (min 6 characters)</label><input type="password" id="newPassInput" required minlength="6" class="inp"></div>
+                <div><label class="lbl">Confirm New Password</label><input type="password" id="confirmPassInput" required minlength="6" class="inp"></div>
                 <div class="pt-2 flex justify-end gap-2">
                     <button type="button" onclick="hideModal('changePassModal')" class="px-4 py-2 bg-slate-100 text-slate-700 font-semibold rounded-xl">Cancel</button>
                     <button type="submit" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl">Update Password</button>
@@ -109,6 +130,10 @@
                 <h3 class="font-bold text-base flex items-center gap-2"><i class="fa-solid fa-users-gear text-indigo-600"></i> User Accounts</h3>
                 <button onclick="hideModal('usersModal')" class="text-slate-400 hover:text-slate-700"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
+            <div id="resetRequests" class="hidden mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs">
+                <p class="font-bold text-amber-800 mb-2"><i class="fa-solid fa-unlock-keyhole"></i> Password reset requests</p>
+                <div id="resetRequestsList" class="space-y-1.5"></div>
+            </div>
             <form onsubmit="handleAddUser(event)" class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
                 <input id="newUserUsername" required class="inp" placeholder="Username">
                 <input id="newUserDisplay" required class="inp" placeholder="Display name">
@@ -117,7 +142,7 @@
                     <option value="Management">Management</option>
                     <option value="Admin">Admin</option>
                 </select>
-                <input id="newUserPassword" type="password" required minlength="8" class="inp" placeholder="Password (8+)">
+                <input id="newUserPassword" type="password" required minlength="6" class="inp" placeholder="Password (6+)">
                 <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl px-3 py-2"><i class="fa-solid fa-user-plus"></i> Add User</button>
             </form>
             <table class="w-full text-left text-xs">
@@ -176,7 +201,6 @@
                     <div><label class="lbl text-indigo-700">On Track Figures (Fixed Provision)</label><div id="otFixedProv" class="ot-box"></div></div>
                     <div><label class="lbl">Repo (fully paid accts)</label><input type="number" step="1" min="0" id="entryRepo" oninput="updateEntryPreview()" class="inp" placeholder="0"></div>
                     <div><label class="lbl text-indigo-700">On Track Figures (Repo)</label><div id="otRepo" class="ot-box"></div></div>
-                    <div><label class="lbl">Provision of Repo (₱)</label><input type="number" step="0.01" min="0" id="entryRepoProv" oninput="updateEntryPreview()" class="inp" placeholder="0.00"></div>
                     <div><label class="lbl">Penalty (₱)</label><input type="number" step="0.01" min="0" id="entryPenalty" oninput="updateEntryPreview()" class="inp" placeholder="0.00"></div>
                 </div>
                 <p id="otInfo" class="text-[10px] text-indigo-700 font-semibold"></p>
@@ -205,42 +229,42 @@
                 </div>
                 <div id="teleNewCampaignWrap" class="hidden"><label class="lbl">New Campaign Name</label><input id="teleNewCampaign" class="inp uppercase" placeholder="e.g. NEW CLIENT"></div>
                 <div><label class="lbl">Full Name</label><input id="teleName" class="inp font-bold uppercase" placeholder="e.g. JUAN DELA CRUZ"></div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div><label class="lbl"># Accounts</label><input type="number" step="1" min="0" id="teleAccs" class="inp"></div>
-                    <div><label class="lbl">Collectibles (₱)</label><input type="number" step="0.01" min="0" id="teleCollectibles" class="inp"></div>
-                </div>
-                <div class="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3">
-                    <p class="font-bold text-emerald-700 mb-2">Provision &amp; targets <span class="font-normal text-emerald-600">(from the source file)</span></p>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div><label class="lbl">Beginning (₱)</label><input type="number" step="0.01" min="0" id="teleBeginning" class="inp"></div>
-                        <div><label class="lbl">Principal Bal (₱)</label><input type="number" step="0.01" min="0" id="telePrincipalBal" class="inp"></div>
-                        <div><label class="lbl">To Retain (₱)</label><input type="number" step="0.01" min="0" id="teleToRetain" class="inp"></div>
-                        <div><label class="lbl">Target Repo (accounts this month)</label><input type="number" step="0.01" min="0" id="teleTargetRepo" class="inp"></div>
-                    </div>
-                    <p class="text-[10px] text-emerald-700 mt-1">To Retain and Target Repo may stay blank until the source provides them.</p>
-                </div>
                 <div class="border border-amber-200 bg-amber-50/50 rounded-xl p-3">
-                    <p class="font-bold text-amber-700 mb-2">Month-to-date totals <span class="font-normal text-amber-600">(normally updated by Daily Entries; edit only to correct)</span></p>
+                    <p class="font-bold text-amber-700 mb-2">COLLECTION <span class="font-normal text-amber-600">(month-to-date; Collection and Penalty are normally updated by Daily Entries)</span></p>
                     <div class="grid grid-cols-2 gap-3">
+                        <div><label class="lbl"># Of Accounts</label><input type="number" step="1" min="0" id="teleAccs" class="inp"></div>
+                        <div><label class="lbl">Collectibles (₱)</label><input type="number" step="0.01" min="0" id="teleCollectibles" class="inp"></div>
                         <div><label class="lbl">Collection (₱)</label><input type="number" step="0.01" min="0" id="teleCollection" class="inp"></div>
                         <div><label class="lbl">Penalty (₱)</label><input type="number" step="0.01" min="0" id="telePenalty" class="inp"></div>
-                        <div><label class="lbl">Fixed Provision (₱)</label><input type="number" step="0.01" min="0" id="teleFixedProv" class="inp"></div>
-                        <div><label class="lbl">Repo</label><input type="number" step="1" min="0" id="teleRepo" class="inp"></div>
-                        <div><label class="lbl">Provision of Repo (₱)</label><input type="number" step="0.01" min="0" id="teleRepoProv" class="inp"></div>
+                        <div class="col-span-2"><label class="lbl">Same Period (₱) <span class="font-normal text-slate-400">— last month at the same point; blank if not available</span></label><input type="number" step="0.01" min="0" id="teleSpCollection" class="inp"></div>
                     </div>
                 </div>
-                <details class="border border-slate-200 rounded-xl p-3">
-                    <summary class="font-bold text-slate-700 cursor-pointer">Last month (comparison figures) <span class="font-normal text-slate-500">— optional</span></summary>
-                    <div class="grid grid-cols-2 gap-3 mt-2">
-                        <div><label class="lbl">Last month collection (₱)</label><input type="number" step="0.01" min="0" id="teleLmCollection" class="inp"></div>
-                        <div><label class="lbl">Same period last month (₱)</label><input type="number" step="0.01" min="0" id="teleLmSpCollection" class="inp"></div>
-                        <div><label class="lbl">Last month fixed provision (₱)</label><input type="number" step="0.01" min="0" id="teleLmFixedProv" class="inp"></div>
-                        <div><label class="lbl">Same period last month (₱)</label><input type="number" step="0.01" min="0" id="teleLmSpFixedProv" class="inp"></div>
-                        <div><label class="lbl">Last month repo</label><input type="number" step="1" min="0" id="teleLmRepo" class="inp"></div>
-                        <div><label class="lbl">Same period last month</label><input type="number" step="1" min="0" id="teleLmSpRepo" class="inp"></div>
+                <div class="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3">
+                    <p class="font-bold text-emerald-700 mb-2">PROVISION</p>
+                    <div class="grid grid-cols-4 gap-2">
+                        <div><label class="lbl"># Of Accounts</label><input type="number" step="1" min="0" id="teleEndingAccs" class="inp"></div>
+                        <div><label class="lbl">Ending (₱)</label><input type="number" step="0.01" min="0" id="teleEnding" class="inp"></div>
+                        <div><label class="lbl"># Of Accounts</label><input type="number" step="1" min="0" id="teleBeginningAccs" class="inp"></div>
+                        <div><label class="lbl">Beginning (₱)</label><input type="number" step="0.01" min="0" id="teleBeginning" class="inp"></div>
+                        <div><label class="lbl"># Of Accounts</label><input type="number" step="1" min="0" id="teleToRetainAccs" class="inp"></div>
+                        <div><label class="lbl">To Retain (₱)</label><input type="number" step="0.01" min="0" id="teleToRetain" class="inp"></div>
+                        <div><label class="lbl"># Of Accounts</label><input type="number" step="1" min="0" id="teleFixedAccs" class="inp"></div>
+                        <div><label class="lbl">Fixed Provision (₱)</label><input type="number" step="0.01" min="0" id="teleFixedProv" class="inp"></div>
+                        <div class="col-span-4"><label class="lbl">Same Period (₱) <span class="font-normal text-slate-400">— last month's fixed provision at the same point; blank if not available</span></label><input type="number" step="0.01" min="0" id="teleSpFixedProv" class="inp"></div>
                     </div>
-                    <p class="text-[10px] text-slate-500 mt-1">"Same period" = last month's figure at the same point of the month (same business day).</p>
-                </details>
+                    <p class="text-[10px] text-emerald-700 mt-1">A blank To Retain means "not provided yet" (ACH % and On Track Provision show —).</p>
+                </div>
+                <div class="border border-indigo-200 bg-indigo-50/40 rounded-xl p-3">
+                    <p class="font-bold text-indigo-700 mb-2">REPO</p>
+                    <div class="grid grid-cols-3 gap-2">
+                        <div><label class="lbl">2nd Month</label><input type="number" step="0.01" min="0" id="teleRepoAge2" class="inp"></div>
+                        <div><label class="lbl">3rd Month</label><input type="number" step="0.01" min="0" id="teleRepoAge3" class="inp"></div>
+                        <div><label class="lbl">4th Month and Up</label><input type="number" step="0.01" min="0" id="teleRepoAge4" class="inp"></div>
+                        <div><label class="lbl">Target (this month)</label><input type="number" step="0.01" min="0" id="teleTargetRepo" class="inp"></div>
+                        <div><label class="lbl">Actual</label><input type="number" step="1" min="0" id="teleRepo" class="inp"></div>
+                        <div><label class="lbl">Same Period</label><input type="number" step="0.01" min="0" id="teleSpRepo" class="inp"></div>
+                    </div>
+                </div>
                 <div id="teleChecks" class="hidden rounded-xl border border-slate-200 bg-white p-3 space-y-1 text-[11px]"></div>
                 <div class="pt-3 flex justify-between gap-2">
                     <button type="button" id="deleteTeleBtn" onclick="handleDeleteTele()" class="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold rounded-xl"><i class="fa-solid fa-trash"></i> Delete</button>
@@ -264,7 +288,7 @@
                 <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-600">
                     <p class="font-bold text-slate-800 mb-1"><i class="fa-solid fa-shield-halved text-indigo-600"></i> Security checks run on every file</p>
                     <p>.xlsx / .xls only (no macro files) · max 5 MB · must really be an Excel file · no macros · not password-protected · every row validated (names, numbers, no negatives, Repo ≤ accounts, no duplicates, totals cross-checked). Nothing changes until you confirm with your Admin password, and an undo copy is saved first.</p>
-                    <p class="mt-1">Use the <b>SUMMARY Campaign TEMPLATE.xlsx</b>: sheet <b>INFO</b> (month and "as of" date), sheets <b>Curing</b> and <b>Recovery</b> (one row per telecollector), and optionally <b>HOLIDAYS</b> and <b>LEADERS</b> (TL / OM / GM). Older files like SUMMARY Campaign.xlsx and files exported from this portal also work.</p>
+                    <p class="mt-1">Use the <b>Summary_Campaign_Revised.xlsx</b> layout: one sheet per campaign (title in A1, a <b>CURING</b> block and a <b>RECOVERY</b> block with COLLECTION / PROVISION / REPO columns), or the <b>Curing</b> and <b>Recovery</b> summary sheets with a CAMPAIGN column. Older files and files exported from this portal also work.</p>
                 </div>
                 <label class="block border-2 border-dashed border-slate-300 hover:border-emerald-400 rounded-xl p-4 text-center cursor-pointer">
                     <i class="fa-solid fa-file-excel text-2xl text-emerald-600"></i>
@@ -289,18 +313,17 @@
         </div>
     </div>
 
-    <!-- Month, "as of" date & holidays (Admin only, from the Data menu) -->
+    <!-- Month & holidays (Admin only, from the Data menu) -->
     <div id="periodModal" class="fixed inset-0 z-50 flex items-center justify-center glass-modal p-4 hidden">
         <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[94vh] overflow-y-auto">
             <div class="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
-                <h3 class="font-bold text-slate-900 text-base flex items-center gap-2"><i class="fa-solid fa-calendar-days text-indigo-600"></i> Month, "As of" Date &amp; Holidays</h3>
+                <h3 class="font-bold text-slate-900 text-base flex items-center gap-2"><i class="fa-solid fa-calendar-days text-indigo-600"></i> Month &amp; Holidays</h3>
                 <button onclick="hideModal('periodModal')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
             <form onsubmit="handleSavePeriod(event)" oninput="livePeriod()" onchange="livePeriod()" class="space-y-3 text-xs">
-                <p class="text-slate-500">Targets (On Track Figures) = monthly figure ÷ business days in the month × business days elapsed up to the "as of" date. Business days = Monday–Friday minus the holidays below. Imports and daily entries move the "as of" date forward automatically.</p>
+                <p class="text-slate-500">ON TRACK = monthly figure ÷ business days in the month × business days up to <b>today</b> (today included). Business days = Monday–Friday minus the holidays below.</p>
                 <div class="grid grid-cols-2 gap-3">
                     <div><label class="lbl">Current month</label><input type="month" id="periodMonth" required placeholder="YYYY-MM" class="inp"></div>
-                    <div><label class="lbl">Data "as of" date <span class="font-normal text-slate-400">(blank = today)</span></label><input type="date" id="periodAsOf" class="inp"></div>
                 </div>
                 <div><label class="lbl">Holidays / non-working days <span class="font-normal text-slate-400">(one per line: YYYY-MM-DD name)</span></label>
                     <textarea id="periodHolidays" rows="9" spellcheck="false" class="inp font-mono text-[11px]" placeholder="2026-12-25 Christmas Day"></textarea></div>
@@ -363,7 +386,7 @@
     <!-- ============================== HEADER ============================== -->
     <header class="bg-white border-b border-slate-200 sticky top-0 z-30 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-sm">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-slate-900 font-bold text-xl shadow-md shadow-amber-500/20"><i class="fa-solid fa-dove"></i></div>
+            <img src="img/logo.png" alt="Eagle Eye" class="w-11 h-11 object-contain">
             <div>
                 <div class="flex items-center gap-2">
                     <h1 class="font-bold text-slate-900 text-lg leading-tight tracking-tight">EAGLE EYE</h1>
@@ -380,7 +403,7 @@
                 <span><strong id="currentUserNameDisplay">—</strong> (<span id="currentUserRoleDisplay">—</span>)</span>
             </div>
             <button onclick="openGuide()" class="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5"><i class="fa-solid fa-circle-question"></i> Column Guide</button>
-            <button onclick="openUsersModal()" class="admin-only hidden bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5"><i class="fa-solid fa-users-gear"></i> Users</button>
+            <button onclick="openUsersModal()" class="admin-only hidden bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5"><i class="fa-solid fa-users-gear"></i> Users <span id="resetBadge" class="hidden bg-rose-500 text-white text-[10px] font-bold rounded-full px-1.5 leading-4" title="Password reset requests"></span></button>
             <div class="relative admin-only hidden">
                 <button id="dataMenuBtn" onclick="toggleDataMenu()" class="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5"><i class="fa-solid fa-database"></i> Data <i class="fa-solid fa-chevron-down text-[9px]"></i></button>
                 <div id="dataMenu" class="hidden absolute right-0 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-lg text-xs z-40 overflow-hidden">
@@ -389,7 +412,7 @@
                     <button onclick="exportExcel()" class="w-full text-left px-3 py-2 hover:bg-slate-50"><i class="fa-solid fa-file-excel w-4 text-emerald-600"></i> Export to Excel</button>
                     <button onclick="exportPDF()" class="w-full text-left px-3 py-2 hover:bg-slate-50"><i class="fa-solid fa-file-pdf w-4 text-rose-600"></i> Export PDF report</button>
                     <p class="px-3 pt-2 pb-1 text-[10px] font-bold text-slate-500 uppercase border-t border-slate-100">Month &amp; settings</p>
-                    <button onclick="openPeriodModal()" class="w-full text-left px-3 py-2 hover:bg-slate-50"><i class="fa-solid fa-calendar-days w-4 text-indigo-600"></i> Month, "as of" date &amp; holidays…</button>
+                    <button onclick="openPeriodModal()" class="w-full text-left px-3 py-2 hover:bg-slate-50"><i class="fa-solid fa-calendar-days w-4 text-indigo-600"></i> Month &amp; holidays…</button>
                     <button onclick="openKpiModal()" class="w-full text-left px-3 py-2 hover:bg-slate-50"><i class="fa-solid fa-sliders w-4"></i> KPI Rate settings</button>
                     <button onclick="handleStartNewMonth()" class="w-full text-left px-3 py-2 hover:bg-slate-50"><i class="fa-solid fa-forward w-4 text-indigo-600"></i> <span id="newMonthLabel">Start new month…</span></button>
                     <p class="px-3 pt-2 pb-1 text-[10px] font-bold text-slate-500 uppercase border-t border-slate-100">Undo / reset</p>
@@ -416,7 +439,7 @@
                 <nav id="companyTabNav" class="flex items-center gap-1 overflow-x-auto"></nav>
             </div>
             <div id="lmCard" class="bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-sm lg:min-w-[320px] lg:text-right">
-                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider"><i class="fa-solid fa-calendar-check text-indigo-500"></i> Last month's collection · <span id="lmCardPeriod">—</span></p>
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider"><i class="fa-solid fa-calendar-check text-indigo-500"></i> Same Period (Collection) · <span id="lmCardPeriod">—</span></p>
                 <h3 id="lmCardValue" class="text-xl font-extrabold text-slate-900 leading-tight mt-0.5">—</h3>
                 <p id="lmCardSub" class="text-[11px] text-slate-500 font-medium mt-0.5"></p>
             </div>
@@ -436,7 +459,7 @@
 
         <!-- Shown when there is no data -->
         <div id="emptyNotice" class="hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-semibold">
-            <i class="fa-solid fa-circle-info"></i> There is no telecollector data yet. The Admin loads it with <b>Data → Import Excel file</b> (SUMMARY Campaign template).
+            <i class="fa-solid fa-circle-info"></i> There is no telecollector data yet. The Admin loads it with <b>Data → Import Excel file</b> (Summary Campaign file).
             <span class="admin-only hidden">If the data was just deleted, <b>Data → Undo</b> brings it back.</span>
         </div>
 
@@ -467,7 +490,7 @@
                 </div>
             </div>
             <div id="coChartWrap" class="hidden px-5 pt-4">
-                <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Repo vs target (number of accounts)</p>
+                <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Repo: actual vs on track (number of accounts)</p>
                 <div class="relative" style="height:280px"><canvas id="coRepoChart" role="img" aria-label="Repo, target repo and same period last month"></canvas></div>
             </div>
             <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead id="coHead"></thead><tbody id="coBody"></tbody></table></div>
@@ -488,7 +511,7 @@
             </div>
             <div class="overflow-x-auto"><table class="w-full text-left border-collapse">
                 <thead><tr class="bg-slate-50/80 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-200">
-                    <th class="py-3 px-3">DATE</th><th class="py-3 px-3">ENCODED</th><th class="py-3 px-3">ENCODED BY</th><th class="py-3 px-3">CAMPAIGN</th><th class="py-3 px-3">BUCKET</th><th class="py-3 px-3">TELECOLLECTOR</th><th class="py-3 px-3">COLLECTION</th><th class="py-3 px-3">PENALTY</th><th class="py-3 px-3">FIXED PROVISION</th><th class="py-3 px-3 text-center">REPO</th><th class="py-3 px-3">PROVISION OF REPO</th><th class="py-3 px-3 text-center">ACTION</th>
+                    <th class="py-3 px-3">DATE</th><th class="py-3 px-3">ENCODED</th><th class="py-3 px-3">ENCODED BY</th><th class="py-3 px-3">CAMPAIGN</th><th class="py-3 px-3">BUCKET</th><th class="py-3 px-3">TELECOLLECTOR</th><th class="py-3 px-3">COLLECTION</th><th class="py-3 px-3">PENALTY</th><th class="py-3 px-3">FIXED PROVISION</th><th class="py-3 px-3 text-center">REPO</th><th class="py-3 px-3 text-center">ACTION</th>
                 </tr></thead>
                 <tbody id="entriesTableBody"></tbody>
             </table></div>
@@ -532,8 +555,9 @@
     <script src="js/core/validation.js"></script>
     <script src="js/core/period.js"></script>
     <script src="js/core/kpi.js"></script>
-    <!-- 3. Storage (Supabase) -->
+    <!-- 3. Storage: Supabase, or Local (this browser) — chosen in js/config.js -->
     <script src="js/backends/supabase-backend.js"></script>
+    <script src="js/backends/local-backend.js"></script>
     <!-- 4. UI & features -->
     <script src="js/ui/charts.js"></script>
     <script src="js/ui/company.js"></script>

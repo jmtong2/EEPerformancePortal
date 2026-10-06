@@ -56,12 +56,11 @@ async function handlePwConfirm(ev) {
 }
 function cancelPwConfirm() { hideModal('pwConfirmModal'); if (pwConfirm) { pwConfirm.resolve(false); pwConfirm = null; } }
 
-/* ---------- Month, as-of date & holidays (business days for the targets) ---------- */
+/* ---------- Month & holidays (business days for the ON TRACK figures) ---------- */
 function openPeriodModal() {
     closeDataMenu();
     if (!isAdmin()) return deny('Only the Admin can change the month and holidays.');
     $('periodMonth').value = currentPeriod();
-    $('periodAsOf').value = state.asOf || '';
     $('periodHolidays').value = (state.holidays || []).map(h => `${h.date}${h.name ? ' ' + h.name : ''}`).join('\n');
     $('periodChecks').dataset.sig = '';
     livePeriod();
@@ -78,20 +77,17 @@ function parseHolidayLines(text, errors) {
 }
 function validatePeriod() {
     const errors = [], warnings = [];
-    const month = $('periodMonth').value, asOf = $('periodAsOf').value;
+    const month = $('periodMonth').value;
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) errors.push('Choose the month.');
-    if (asOf) {
-        if (periodOf(asOf) !== month) errors.push('The "as of" date must be inside the chosen month.');
-        if (asOf > todayStr()) errors.push('The "as of" date cannot be in the future.');
-    }
     const holidays = parseHolidayLines($('periodHolidays').value, errors);
     if (!errors.length) {
         const saved = state.holidays; state.holidays = holidays;
-        const prog = bdProgress(asOf || (periodOf(todayStr()) === month ? todayStr() : (todayStr() > month ? lastDayOf(month) : month + '-01')));
+        const today = todayStr(), day = periodOf(today) === month ? today : (today > month ? lastDayOf(month) : month + '-01');
+        const prog = bdProgress(day);
         state.holidays = saved;
-        $('periodInfo').innerText = `${periodLabel(month)}: ${prog.total} business days (Mon–Fri minus ${holidays.filter(h => periodOf(h.date) === month).length} holiday(s)). As of ${dateLabel(prog.asOf)}: business day ${prog.elapsed} of ${prog.total}.`;
+        $('periodInfo').innerText = `${periodLabel(month)}: ${prog.total} business days (Mon–Fri minus ${holidays.filter(h => periodOf(h.date) === month).length} holiday(s)). Up to ${day === today ? 'today' : dateLabel(day)}: business day ${prog.elapsed} of ${prog.total}.`;
     } else $('periodInfo').innerText = '';
-    return { errors, warnings, month, asOf, holidays };
+    return { errors, warnings, month, holidays };
 }
 function livePeriod() { renderChecks('periodChecks', validatePeriod()); }
 async function handleSavePeriod(ev) {
@@ -100,17 +96,16 @@ async function handleSavePeriod(ev) {
     const v = validatePeriod();
     if (!checksPass('periodChecks', v)) return;
     try {
-        await busy(ev.submitter, () => Backend.saveConfig({ currentPeriod: v.month, asOf: v.asOf || null, holidays: v.holidays }));
-        hideModal('periodModal'); toast('Month, as-of date and holidays saved. Targets updated.', 'ok');
+        await busy(ev.submitter, () => Backend.saveConfig({ currentPeriod: v.month, holidays: v.holidays }));
+        hideModal('periodModal'); toast('Month and holidays saved. ON TRACK figures updated.', 'ok');
     } catch { }
 }
-
 /* ---------- start new month / delete all / undo / reset (Admin only) ---------- */
 async function handleStartNewMonth() {
     closeDataMenu();
     if (!isAdmin()) return deny('Only the Admin can start a new month.');
     const cur = currentPeriod(), next = shiftPeriod(cur, 1);
-    const answer = prompt(`Close ${periodLabel(cur)} and start ${periodLabel(next)}?\n\n• This month's Collection, Fixed Provision and Repo become "last month" figures (shown in the comparison columns).\n• This month's actuals (collection, penalty, fixed provision, repo, provision of repo) restart at zero.\n• Telecollectors, accounts, collectibles, beginning, principal balance, To Retain and targets are kept until you import the new month's file.\n\nYou can undo this from Data → Undo.\n\nType NEW MONTH to confirm.`);
+    const answer = prompt(`Close ${periodLabel(cur)} and start ${periodLabel(next)}?\n\n• This month's actuals restart at zero: collection, penalty, fixed provision (and its # of accounts) and repo (actual and ages).\n• SAME PERIOD figures are cleared until the next Excel file provides them.\n• Telecollectors, # of accounts, collectibles, ending, beginning, To Retain and repo targets are kept until you import the new month's file.\n\nYou can undo this from Data → Undo.\n\nType NEW MONTH to confirm.`);
     if (answer === null) return;
     if (answer.trim().toUpperCase() !== 'NEW MONTH') return toast('Not started — you must type NEW MONTH exactly.', 'info');
     try { const p = await withProgress('Starting the new month…', () => Backend.startNewMonth()); toast(`${periodLabel(p || next)} started. Use Data → Undo to go back.`, 'ok'); }

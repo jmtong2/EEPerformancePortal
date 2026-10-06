@@ -1,20 +1,20 @@
 /* Add / edit / delete telecollectors (Admin & Management). */
 
-// [input id, field, kind]  kind: int | money | optMoney | optInt
+// [input id, field, kind]  kind: int | money | optMoney | optInt   (same fields as the Excel file)
 const TELE_FIELDS = [
-    ['teleAccs', 'accs1', 'int'], ['teleCollectibles', 'collectibles', 'money'],
-    ['teleBeginning', 'beginning', 'money'], ['telePrincipalBal', 'principalBal', 'money'], ['teleToRetain', 'toRetain', 'optMoney'],
-    ['teleTargetRepo', 'targetRepo', 'optMoney'],
-    ['teleCollection', 'collection', 'money'], ['telePenalty', 'penalty', 'money'], ['teleFixedProv', 'fixedProv', 'money'],
-    ['teleRepo', 'repo', 'int'], ['teleRepoProv', 'repoProv', 'money'],
-    ['teleLmCollection', 'lmCollection', 'optMoney'], ['teleLmSpCollection', 'lmSpCollection', 'optMoney'],
-    ['teleLmFixedProv', 'lmFixedProv', 'optMoney'], ['teleLmSpFixedProv', 'lmSpFixedProv', 'optMoney'],
-    ['teleLmRepo', 'lmRepo', 'optInt'], ['teleLmSpRepo', 'lmSpRepo', 'optInt']
+    ['teleAccs', 'accs1', 'int'], ['teleCollectibles', 'collectibles', 'money'], ['teleCollection', 'collection', 'money'], ['telePenalty', 'penalty', 'money'],
+    ['teleSpCollection', 'lmSpCollection', 'optMoney'],
+    ['teleEndingAccs', 'endingAccs', 'int'], ['teleEnding', 'ending', 'money'], ['teleBeginningAccs', 'beginningAccs', 'int'], ['teleBeginning', 'beginning', 'money'],
+    ['teleToRetainAccs', 'toRetainAccs', 'int'], ['teleToRetain', 'toRetain', 'optMoney'], ['teleFixedAccs', 'fixedAccs', 'int'], ['teleFixedProv', 'fixedProv', 'money'],
+    ['teleSpFixedProv', 'lmSpFixedProv', 'optMoney'],
+    ['teleRepoAge2', 'repoAge2', 'money'], ['teleRepoAge3', 'repoAge3', 'money'], ['teleRepoAge4', 'repoAge4', 'money'],
+    ['teleTargetRepo', 'targetRepo', 'optMoney'], ['teleRepo', 'repo', 'int'], ['teleSpRepo', 'lmSpRepo', 'optMoney']
 ];
-const TELE_LABELS = { accs1: '# Accounts', collectibles: 'Collectibles', beginning: 'Beginning', principalBal: 'Principal Bal', toRetain: 'To Retain',
-    targetRepo: 'Target Repo', collection: 'Collection', penalty: 'Penalty', fixedProv: 'Fixed Provision', repo: 'Repo', repoProv: 'Provision of Repo',
-    lmCollection: 'Last month collection', lmSpCollection: 'Last month same-period collection', lmFixedProv: 'Last month fixed provision',
-    lmSpFixedProv: 'Last month same-period fixed provision', lmRepo: 'Last month repo', lmSpRepo: 'Last month same-period repo' };
+const TELE_LABELS = { accs1: '# Of Accounts', collectibles: 'Collectibles', collection: 'Collection', penalty: 'Penalty', lmSpCollection: 'Same Period (Collection)',
+    endingAccs: '# Of Accounts (Ending)', ending: 'Ending', beginningAccs: '# Of Accounts (Beginning)', beginning: 'Beginning',
+    toRetainAccs: '# Of Accounts (To Retain)', toRetain: 'To Retain', fixedAccs: '# Of Accounts (Fixed Provision)', fixedProv: 'Fixed Provision',
+    lmSpFixedProv: 'Same Period (Provision)', repoAge2: '2nd Month', repoAge3: '3rd Month', repoAge4: '4th Month and Up',
+    targetRepo: 'Target (repo)', repo: 'Actual (repo)', lmSpRepo: 'Same Period (Repo)' };
 
 function openTeleModal(key) {
     if (!canEdit()) return deny('Only Admin and Management can add or edit telecollectors.');
@@ -52,19 +52,19 @@ function validateTele(submit) {
     });
 
     if (f.toRetain !== null && f.beginning > 0 && f.toRetain > f.beginning) errors.push('To Retain cannot be greater than Beginning.');
-    if (f.accs1 > 0 && f.repo > f.accs1) errors.push('Repo (fully paid accounts) cannot be more than # Accounts.');
+    if (f.accs1 > 0 && f.repo > f.accs1) errors.push('Repo actual (fully paid accounts) cannot be more than # of accounts.');
     if (submit || oldKey) {
-        if (!f.accs1) warnings.push('# Accounts is 0.');
-        if (!f.collectibles) warnings.push('Collectibles is 0, so EFF % and Target Collection will show 0.');
+        if (!f.accs1) warnings.push('# of accounts is 0.');
+        if (!f.collectibles) warnings.push('Collectibles is 0, so EFF % and On Track Collection will show 0.');
     }
     if (f.collectibles > 0 && f.collection > f.collectibles) warnings.push('Collection is higher than Collectibles (EFF over 100%).');
     if (f.toRetain !== null && f.toRetain > 0 && f.fixedProv > f.toRetain) warnings.push('Fixed Provision is higher than To Retain (ACH over 100%).');
     if (f.penalty > 0 && f.penalty > f.collection) warnings.push('Penalty is higher than Collection.');
-    [['lmSpCollection', 'lmCollection'], ['lmSpFixedProv', 'lmFixedProv'], ['lmSpRepo', 'lmRepo']].forEach(([sp, tot]) => {
-        if (f[sp] !== null && f[tot] !== null && f[sp] > f[tot]) warnings.push(`${TELE_LABELS[sp]} is higher than ${TELE_LABELS[tot].toLowerCase()}.`);
-    });
+    if (f.toRetainAccs > 0 && f.fixedAccs > f.toRetainAccs) warnings.push('# of accounts for Fixed Provision is higher than for To Retain.');
 
-    const c = makeCollector({ campaign, team, name, ...f });
+    // Older fields that are no longer on the form (from earlier source files) are kept as they are.
+    const before = oldKey ? findCollector(oldKey) : null;
+    const c = makeCollector({ ...(before || {}), campaign, team, name, ...f });
     let dupKey = null;
     if (name && campaign && c.key !== oldKey) {
         const ex = findCollector(c.key);

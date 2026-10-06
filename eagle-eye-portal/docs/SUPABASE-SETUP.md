@@ -1,20 +1,20 @@
-# Eagle Eye Performance Portal v7: Supabase Setup and Monthly Routine
+# Eagle Eye Performance Portal v8: Supabase Setup and Monthly Routine
 
-The portal stores everything in **Supabase**: logins, telecollectors, settings and the entries log. No data is kept in the website files.
+In Supabase mode the portal stores everything in **Supabase**: logins, telecollectors, settings and the entries log. No data is kept in the website files. (To run on one PC without Supabase, see "Running locally" in `README.md`.)
 
 ---
 
-## Already running an earlier version on Supabase? Upgrade to v7
-1. Supabase Dashboard → **SQL Editor → New query**. Paste **all** of the new `database/supabase-setup.sql` and click **Run**. Your existing data is kept.
-   - The upgrade clears **To Retain**, which will come from the new source file.
-   - It also loads the 2026 Philippine holidays.
+## Already running an earlier version on Supabase? Upgrade to v8
+1. Supabase Dashboard → **SQL Editor → New query**. Paste **all** of the new `database/supabase-setup.sql` and click **Run**. Your existing data is kept. The upgrade:
+   - adds the new columns of the Summary_Campaign_Revised layout (ENDING, # OF ACCOUNTS per provision figure, repo by age);
+   - adds the "Forgot password?" requests;
+   - resets the KPI Rate to the standard targets and weights.
 2. Replace the website files with the new `eagle-eye-portal` folder. Before you do, copy your three lines from the old `js/config.js` into the new one: `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_EMAIL_DOMAIN`.
-3. Log in as Admin. Fill in **SUMMARY Campaign TEMPLATE.xlsx**, then upload it with **Data → Import Excel file…** and choose **Replace all data**.
+3. Log in as Admin and import the filled **Summary_Campaign_Revised.xlsx** with **Data → Import Excel file…** (**Replace all data**).
 
-If you skip step 1, the portal says *"The Supabase database is not set up for v7 yet"*.
+If you skip step 1, the portal says *"The Supabase database is not set up for this version yet"*.
 
 ---
-
 ## New project: step by step (about 20 minutes, free plan)
 
 ### Step 1: Create the Supabase project
@@ -51,8 +51,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOi...';   // or sb_publishable_...
 
 ### Step 6: Create the Admin and load the data
 1. Open the portal link. The **First-time Setup** form appears.
-2. Enter your username, display name and a password of 8 or more characters. You become the **Admin**.
-3. Go to **Data → Import Excel file…** and upload the filled **SUMMARY Campaign TEMPLATE.xlsx**.
+2. Enter your username, display name and a password of 6 or more characters. You become the **Admin**. (To keep the usual logins, use username `admin` here, then add `management` and `analyst` in Step 7.)
+3. Go to **Data → Import Excel file…** and upload the filled **Summary_Campaign_Revised.xlsx**.
 
 > Do this **right after** the site goes online. Until an Admin exists, whoever opens the link first could claim the Admin account.
 
@@ -64,38 +64,33 @@ Go to **Users** and add each person's username, display name, role (**Admin / Ma
 
 ---
 
-## The source file: SUMMARY Campaign TEMPLATE.xlsx
-| Sheet | What to fill in |
-|---|---|
-| **INFO** | **MONTH** and **AS OF DATE**, the date the month-to-date figures run up to. |
-| **Curing / Recovery** | One row per telecollector. **Yellow** columns must be filled; a blank counts as 0. **Green** columns are optional: a blank means "not provided yet" and the portal shows "—". |
-| **HOLIDAYS** | Non-working days. These reduce the business days used for the targets. |
-| **LEADERS** | TL / OM / AOM / GM and the campaigns they handle, separated by commas. |
-| **README** | Instructions, column dictionary, an example row and the assumptions. This sheet is never imported. |
+## The source file: Summary_Campaign_Revised.xlsx
+See "Excel source" in `README.md`.
+- **Layout:** one sheet per campaign, each with CURING and RECOVERY blocks (or the Curing / Recovery summary sheets).
+- **Blank cells:** a blank TO RETAIN, TARGET or SAME PERIOD means "not provided".
+- **Computed by the portal:** the VARIANCE, % and ON TRACK columns.
+- **Optional extra sheets** are still read: HOLIDAYS (DATE, DESCRIPTION) and LEADERS (TYPE, FULL NAME, HANDLED CAMPAIGNS).
 
 Files exported from the portal (**Data → Export to Excel**) can be imported back the same way.
 
 ## Monthly routine (Admin)
 1. **During the month:** keep the totals current in one of two ways:
-   - re-import the updated template (**Replace all data**);
+   - re-import the updated Excel file (**Replace all data**);
    - have Admin / Management add **Daily Log-in Entries**.
-
-   Each import or entry moves the "as of" date forward.
-2. **Targets (On Track Figures):** the portal computes them as monthly figure ÷ business days in the month × business days elapsed up to the "as of" date.
+2. **ON TRACK figures:** the portal computes them as monthly figure ÷ business days in the month × business days up to today (today included).
    - Business days are Monday–Friday minus the holidays.
-   - To check or adjust these, use **Data → Month, "as of" date & holidays…**.
+   - To check or adjust the month and holidays, use **Data → Month & holidays…**.
 3. **At month end:**
-   - **Data → Start new month…** copies this month's Collection, Fixed Provision and Repo into the "last month" columns, sets the actuals back to zero, and moves to the next month.
+   - **Data → Start new month…** sets this month's actuals back to zero (collection, penalty, fixed provision and its # of accounts, repo), clears SAME PERIOD and moves to the next month.
    - Then import the new month's file.
-   - If the file already has the **LM** columns, you can skip **Start new month** and just import.
 4. **Mistakes:**
    - **Data → Undo** reverses the last import, reset, new month or delete-all.
    - **Data → Reset to last imported file…** returns everything to how it was right after the last import.
-
 ## Coming from the Firebase version
 In the old portal, go to **Data → Export to Excel**, then import that file here with **Replace all data**. Re-create the user accounts; logins can't be copied between systems. The entries-log history doesn't transfer, but every telecollector's totals do.
 
 ## Forgotten passwords
+- **Anyone:** **Forgot password?** on the login screen sends a request; the Admin sees it under **Users** (red count on the button) and uses **Reset PW**.
 - **A normal user:** the Admin uses **Users → Reset PW**.
 - **The only Admin:** in **SQL Editor**, run the following (change the username and the password), then log in and change the password again under **Password**:
   ```sql
@@ -116,7 +111,7 @@ In the old portal, go to **Data → Export to Excel**, then import that file her
 | "Supabase is not connected yet" | Fill in `SUPABASE_URL` and `SUPABASE_ANON_KEY` (Step 4). |
 | "SUPABASE_URL … is wrong" / "Invalid path specified in request URL" | Use exactly `https://xxxx.supabase.co`, with nothing after `.co`. |
 | "SUPABASE_ANON_KEY … is wrong" | Copy the **anon / publishable** key again. |
-| "The Supabase database is not set up for v7 yet" | Run `database/supabase-setup.sql` again (Step 3). |
+| "The Supabase database is not set up for this version yet" | Run `database/supabase-setup.sql` again (Step 3). |
 | "This login is not confirmed…" | Turn **Confirm email** OFF (Step 2), then delete and re-add the user. |
 | "Supabase rejected the login e-mail domain" | Set `SUPABASE_EMAIL_DOMAIN` in `js/config.js` to your company e-mail domain **before** creating users. |
 | "This login has no portal access" | Delete the user and add them again under **Users**. |

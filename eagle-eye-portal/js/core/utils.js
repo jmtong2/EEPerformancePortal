@@ -26,6 +26,8 @@ function pct(a, b) { return b > 0 ? (a / b) * 100 : 0; }
 function todayStr() { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
 function fmtDateTime(ms) { return ms ? new Date(ms).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : '—'; }
 function validUsername(u) { return /^[a-z0-9._-]{3,30}$/.test(u); }
+// Minimum length for new passwords (js/config.js; 6 if an older config.js does not set it).
+const minPasswordLength = () => (typeof MIN_PASSWORD_LENGTH === 'number' && MIN_PASSWORD_LENGTH >= 6 ? MIN_PASSWORD_LENGTH : 6);
 
 function levenshtein(a, b) {
     if (Math.abs(a.length - b.length) > 3) return 99;
@@ -80,7 +82,7 @@ function friendlyError(e) {
     if (/unable to validate email address/i.test(m)) return 'Supabase could not accept this login name. Type your username only (no @, no spaces). If it keeps happening, SUPABASE_EMAIL_DOMAIN in js/config.js must be just a domain such as yourcompany.com, or empty.';
     if (/email address .*invalid|email_address_invalid/i.test(m)) return 'Supabase rejected the login e-mail domain. Set SUPABASE_EMAIL_DOMAIN in js/config.js to your company e-mail domain (before creating users).';
     if (/signups? not allowed|signup.*disabled/i.test(m)) return 'In Supabase, turn ON "Allow new users to sign up" (Authentication → Sign In / Providers).';
-    if (code === 'PGRST202' || /could not find the function|schema cache|relation .* does not exist|column .* does not exist/i.test(m)) return 'The Supabase database is not set up for v7 yet. Run database/supabase-setup.sql again (docs/SUPABASE-SETUP.md, step 3).';
+    if (code === 'PGRST202' || /could not find the function|schema cache|relation .* does not exist|column .* does not exist/i.test(m)) return 'The Supabase database is not set up for this version yet. Run database/supabase-setup.sql again (docs/SUPABASE-SETUP.md, step 3).';
     if (code === '42501' || /permission denied/i.test(m)) return 'Permission denied for your role.';
     if (/jwt expired|invalid jwt|refresh token/i.test(m)) return 'Your session expired. Please log in again.';
     if (/rate limit/i.test(m)) return 'Too many attempts. Please wait a few minutes and try again.';
