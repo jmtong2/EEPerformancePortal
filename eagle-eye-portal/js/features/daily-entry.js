@@ -17,7 +17,7 @@ function openEntryModal(prefKey) {
 function refreshEntryNames(selectKey) {
     const camp = $('entryCampaign').value, team = $('entryTeam').value;
     const list = state.collectors.filter(c => c.campaign === camp && c.team === team).sort((a, b) => a.name.localeCompare(b.name));
-    $('entryName').innerHTML = list.length ? list.map(c => `<option value="${esc(c.key)}">${esc(c.name)}</option>`).join('') : `<option value="">— No ${team} teles in this campaign —</option>`;
+    $('entryName').innerHTML = list.length ? list.map(c => `<option value="${esc(c.key)}">${esc(c.name)}</option>`).join('') : `<option value="">No ${team} teles in this campaign</option>`;
     if (selectKey) $('entryName').value = selectKey;
     updateEntryPreview();
 }
@@ -35,7 +35,7 @@ function validateEntry(submit) {
     if (!date) errors.push('Date is required.');
     else if (date > todayStr()) errors.push('Date cannot be in the future.');
     else {
-        if ((new Date(todayStr()) - new Date(date)) / 864e5 > 45) warnings.push('Date is more than 45 days ago — is this correct?');
+        if ((new Date(todayStr()) - new Date(date)) / 864e5 > 45) warnings.push('Date is more than 45 days ago. Is this correct?');
         if (periodOf(date) !== currentPeriod()) warnings.push(`This date is not in the current month (${periodLabel(currentPeriod())}).`);
     }
     const collection = readMoney('entryCollection', 'Collection', errors), penalty = readMoney('entryPenalty', 'Penalty', errors),
@@ -66,13 +66,13 @@ function updateEntryPreview() {
         $('otCollection').innerHTML = formatPHP(t.collection) + after(c.collection + v.collection, t.collection, formatPHP);
         $('otFixedProv').innerHTML = t.provision === null ? `${DASH}<span class="ot-sub">Needs TO RETAIN from the Excel file</span>` : formatPHP(t.provision) + after(c.fixedProv + v.fixedProv, t.provision, formatPHP);
         $('otRepo').innerHTML = t.repo === null ? `${DASH}<span class="ot-sub">Needs the repo TARGET from the Excel file</span>` : fmtUnits(t.repo) + after(c.repo + v.repo, t.repo, fmtInt);
-        $('otInfo').innerText = `ON TRACK as of ${dateLabel(t.prog.asOf)} — business day ${t.prog.elapsed} of ${t.prog.total} in ${periodLabel(t.prog.period)}.`;
-        box.innerHTML = `<div class="font-bold text-slate-800 mb-1">${esc(c.name)} · ${esc(c.campaign)} · ${c.team} — month-to-date</div>
+        $('otInfo').innerText = `ON TRACK as of ${dateLabel(t.prog.asOf)} · business day ${t.prog.elapsed} of ${t.prog.total} in ${periodLabel(t.prog.period)}.`;
+        box.innerHTML = `<div class="font-bold text-slate-800 mb-1">${esc(c.name)} · ${esc(c.campaign)} · ${c.team} · month-to-date</div>
         <div class="grid grid-cols-2 gap-2">
             <div>Collection <span class="text-slate-400">(EFF ${pct(c.collection + v.collection, c.collectibles).toFixed(1)}%)</span><br><b>${formatPHP(c.collection)}</b> <span class="text-emerald-600">→ ${formatPHP(c.collection + v.collection)}</span></div>
             <div>Penalty<br><b>${formatPHP(c.penalty)}</b> <span class="text-emerald-600">→ ${formatPHP(c.penalty + v.penalty)}</span></div>
             <div>Fixed Provision<br><b>${fmtNum(c.fixedProv)}</b> <span class="text-emerald-600">→ ${fmtNum(c.fixedProv + v.fixedProv)}</span></div>
-            <div>Repo (actual) <span class="text-slate-400">(of ${c.accs1} accts)</span><br><b>${c.repo}</b> <span class="text-emerald-600">→ ${c.repo + v.repo}</span></div>
+            <div>Repo units (actual) <span class="text-slate-400">(of ${c.accs1} accts)</span><br><b>${c.repo}</b> <span class="text-emerald-600">→ ${c.repo + v.repo}</span></div>
         </div>`;
     }
     renderChecks('entryChecks', v);

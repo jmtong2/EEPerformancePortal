@@ -1,18 +1,17 @@
-# Eagle Eye Performance Portal v8: Supabase Setup and Monthly Routine
+# Eagle Eye Performance Portal v9: Supabase Setup and Monthly Routine
 
-In Supabase mode the portal stores everything in **Supabase**: logins, telecollectors, settings and the entries log. No data is kept in the website files. (To run on one PC without Supabase, see "Running locally" in `README.md`.)
+In Supabase mode the portal stores everything in **Supabase**: logins, telecollectors, settings and the entries log. No telecollector data is kept in the website files. (To run on one PC without Supabase, see "Running locally" in `README.md`.)
 
 ---
 
-## Already running an earlier version on Supabase? Upgrade to v8
+## Already running an earlier version on Supabase? Upgrade to v9
 1. Supabase Dashboard → **SQL Editor → New query**. Paste **all** of the new `database/supabase-setup.sql` and click **Run**. Your existing data is kept. The upgrade:
-   - adds the new columns of the Summary_Campaign_Revised layout (ENDING, # OF ACCOUNTS per provision figure, repo by age);
-   - adds the "Forgot password?" requests;
-   - resets the KPI Rate to the standard targets and weights.
+   - **v9:** loads the standard TL and OM & AOM lists (the GM list is kept) and makes TL / OM & AOM / GM changes Admin-only;
+   - **v8 (if you skipped it):** adds the columns of the Summary_Campaign_Revised layout (ENDING, # OF ACCOUNTS per provision figure, repo by age) and the "Forgot password?" requests, and resets the KPI Rate to the standard targets and weights.
 2. Replace the website files with the new `eagle-eye-portal` folder. Before you do, copy your three lines from the old `js/config.js` into the new one: `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_EMAIL_DOMAIN`.
-3. Log in as Admin and import the filled **Summary_Campaign_Revised.xlsx** with **Data → Import Excel file…** (**Replace all data**).
+3. Coming from v7 or earlier: log in as Admin and import the filled **Summary_Campaign_Revised.xlsx** with **Data → Import Excel file…** (**Replace all data**).
 
-If you skip step 1, the portal says *"The Supabase database is not set up for this version yet"*.
+If you skip step 1, the Admin sees a red "Finish the v9 upgrade" notice (or, from v7 and earlier, *"The Supabase database is not set up for this version yet"*).
 
 ---
 ## New project: step by step (about 20 minutes, free plan)
@@ -57,7 +56,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOi...';   // or sb_publishable_...
 > Do this **right after** the site goes online. Until an Admin exists, whoever opens the link first could claim the Admin account.
 
 ### Step 7: Add the other accounts
-Go to **Users** and add each person's username, display name, role (**Admin / Management / Analyst**) and password.
+Go to **Users** and add each person's username, display name, role (**Admin / Management / Analyst**) and password. (Management can add and edit telecollectors and daily entries; only the Admin changes TL / OM & AOM / GM.)
 - **Reset PW** sets a new password immediately.
 - **Delete** removes the login completely, so the username can be reused.
 - Role changes and un-ticking **Active** take effect immediately, even if the person is logged in.

@@ -14,7 +14,7 @@ const TABS = [
 ];
 const LEADER_TYPES = {
     tl: { title: 'TEAM LEADERS (TL) RANKING & PERFORMANCE (AUTO-CONSOLIDATED)', icon: 'fa-user-tie', c: 'blue', btn: 'Add TL' },
-    om: { title: 'OPERATION MANAGERS & ASSISTANT OM RANKING (AUTO-CONSOLIDATED)', icon: 'fa-user-shield', c: 'indigo', btn: 'Add OM' },
+    om: { title: 'OPERATION MANAGERS & ASSISTANT OM RANKING (AUTO-CONSOLIDATED)', icon: 'fa-user-shield', c: 'indigo', btn: 'Add OM / AOM' },
     gm: { title: 'GENERAL MANAGERS (GM) RANKING & PERFORMANCE (AUTO-CONSOLIDATED)', icon: 'fa-crown', c: 'amber', btn: 'Add GM' }
 };
 
@@ -52,7 +52,8 @@ function buildScaffold() {
     $('companyTabNav').innerHTML = CO_TABS.map(tabBtn).join('');
     $('tabNav').innerHTML = TABS.map(tabBtn).join('');
 
-    const teleHead = kpi => th([['RANK', 'text-center'], ['CAMPAIGN'], ['FULL NAME'], ['# ACCS', 'text-center'], ...METRIC_COLS, ['KPI RATE', `text-center font-extrabold ${kpi}`], ['ACTION', 'text-center']]);
+    // ACTION columns are only shown to the roles that can use them (Analysts are view only): teles = Admin + Management, leaders = Admin.
+    const teleHead = kpi => th([['RANK', 'text-center'], ['CAMPAIGN'], ['FULL NAME'], ['# ACCS', 'text-center'], ...METRIC_COLS, ['KPI RATE', `text-center font-extrabold ${kpi}`], ['ACTION', 'text-center edit-only hidden']]);
     $('curingHead').innerHTML = teleHead('bg-amber-50/50 text-amber-900 border-l border-r border-amber-100');
     $('recoveryHead').innerHTML = teleHead('bg-blue-50/50 text-blue-900 border-l border-r border-blue-100');
 
@@ -61,11 +62,11 @@ function buildScaffold() {
             <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                 <div class="flex items-center gap-2"><i class="fa-solid ${t.icon} text-${t.c}-600"></i><h3 class="font-bold text-${t.c}-700 text-xs tracking-wide uppercase">${t.title}</h3></div>
                 <div class="flex items-center gap-3">
-                    <button onclick="openLeaderModal('${k}', -1)" class="edit-only hidden bg-${t.c}-600 hover:bg-${t.c}-700 text-white px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fa-solid fa-plus"></i> ${t.btn}</button>
+                    <button onclick="openLeaderModal('${k}', -1)" class="admin-only hidden bg-${t.c}-600 hover:bg-${t.c}-700 text-white px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1"><i class="fa-solid fa-plus"></i> ${t.btn}</button>
                     <span id="${k}Count" class="bg-${t.c}-100 text-${t.c}-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full"></span>
                 </div>
             </div>
-            <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead>${th([['RANK', 'text-center'], ['FULL NAME'], ['HANDLED CAMPAIGNS'], ['# ACCS', 'text-center'], ...METRIC_COLS, ['KPI RATE', `text-center font-extrabold bg-${t.c}-50/50 text-${t.c}-900`], ['ACTION', 'text-center']])}</thead><tbody id="${k}TableBody"></tbody></table></div>
+            <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead>${th([['RANK', 'text-center'], ['FULL NAME'], ['HANDLED CAMPAIGNS'], ['# ACCS', 'text-center'], ...METRIC_COLS, ['KPI RATE', `text-center font-extrabold bg-${t.c}-50/50 text-${t.c}-900`], ['ACTION', 'text-center admin-only hidden']])}</thead><tbody id="${k}TableBody"></tbody></table></div>
         </div>`).join('');
 
     const chartCard = (icon, color, title, canvasId) => `
@@ -122,6 +123,8 @@ function renderDashboard() {
     $('telemetryHeaderContainer').style.display = tele ? '' : 'none';
     $('accessLevelNotice').innerText = isAdmin() ? 'Mode: Admin (Full Access)' : canEdit() ? 'Mode: Management (Edit Access)' : 'Mode: Analyst (View Only)';
     $('emptyNotice').classList.toggle('hidden', state.collectors.length > 0);
+    // Supabase database still on an older setup script (the v9 SQL adds the TL / OM & AOM lists and Admin-only leader changes).
+    $('upgradeNotice').classList.toggle('hidden', !(isAdmin() && Backend && Backend.mode === 'cloud' && state.schemaVersion !== null && state.schemaVersion < 9));
 
     if (currentActiveTab.startsWith('co-')) {
         $('companySection').classList.remove('hidden');
@@ -151,7 +154,7 @@ function renderCards(filtered) {
     $('cardCollection').innerText = formatPHP(t.collection);
     $('cardLiqRate').innerText = `${t.effRate.toFixed(1)}% Efficiency Rate`;
     $('cardPenalty').innerText = formatPHP(t.penalty);
-    $('cardPenRate').innerText = `${t.penRate.toFixed(1)}% of Collection`;
+    $('cardPenRate').innerText = `${t.penRate.toFixed(1)}% Penalty Rate`;
     $('cardProvision').innerText = fmtNum(t.fixedProv);
     $('cardProvRate').innerText = t.achRate === null ? 'ACH % shows once TO RETAIN is in the data' : `${t.achRate.toFixed(1)}% ACH (of ${fmtNum(t.toRetain)} To Retain)`;
     $('cardRepo').innerText = fmtInt(t.repo);
@@ -174,15 +177,17 @@ function renderLastMonthCard(filtered) {
         `<i class="fa-solid ${v >= 0 ? 'fa-caret-up' : 'fa-caret-down'}"></i> ${formatPHP(v)}${ch === null ? '' : ` (${ch >= 0 ? '+' : ''}${ch.toFixed(1)}%)`}</b>`;
 }
 
+// 4 name/count columns + the 12 metric columns + KPI RATE, plus ACTION when the role can use it.
+const tableCols = withAction => 4 + METRIC_COLS.length + 1 + (withAction ? 1 : 0);
+
 function renderTeleTable(team, filtered, color) {
-    const ranked = rankedTeles(team, filtered);
+    const ranked = rankedTeles(team, filtered), edit = canEdit();
     $(`${team}Count`).innerText = `${ranked.length} Specialists`;
     $(`${team}TableBody`).innerHTML = ranked.map(i => {
         const k = esc(i.key);
-        const actions = canEdit()
-            ? `<button onclick="openEntryModal('${k}')" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-plus"></i> Entry</button>
-               <button onclick="openTeleModal('${k}')" class="bg-amber-50 hover:bg-amber-100 text-amber-600 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen"></i> Edit</button>`
-            : '<span class="text-slate-400">View</span>';
+        const actions = !edit ? '' : `<td class="${TD} text-center whitespace-nowrap">
+            <button onclick="openEntryModal('${k}')" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-plus"></i> Entry</button>
+            <button onclick="openTeleModal('${k}')" class="bg-amber-50 hover:bg-amber-100 text-amber-600 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen"></i> Edit</button></td>`;
         return `<tr class="${ROW}">
             <td class="${TD} text-center font-bold text-${color}-600 whitespace-nowrap">${rankBadge(i.assignedRank)}</td>
             <td class="${TD} font-bold text-indigo-600">${esc(i.campaign)}</td>
@@ -190,23 +195,26 @@ function renderTeleTable(team, filtered, color) {
             <td class="${TD} text-center text-slate-600 font-semibold">${i.accs1}</td>
             ${metricCells(i, `text-${color}-600`)}
             <td class="${TD} text-center font-extrabold text-${color}-600 bg-${color}-50/40 border-l border-r border-${color}-100 text-sm">${i.kpiRate.toFixed(1)}%</td>
-            <td class="${TD} text-center whitespace-nowrap">${actions}</td>
+            ${actions}
         </tr>`;
-    }).join('') || `<tr><td colspan="18" class="py-6 text-center text-xs text-slate-400">No telecollectors match.</td></tr>`;
+    }).join('') || `<tr><td colspan="${tableCols(edit)}" class="py-6 text-center text-xs text-slate-400">No telecollectors match.</td></tr>`;
 }
 
 function renderLeaderTable(type, q, camp) {
     const ranked = rankedLeaders(type, camp).filter(i => i.name.toLowerCase().includes(q) || i.campaigns.some(c => c.toLowerCase().includes(q)));
+    const admin = isAdmin(), withData = new Set(state.collectors.map(c => c.campaign));
+    // Campaigns without telecollectors (e.g. a different spelling in the Excel file) are greyed out so the Admin can spot them.
+    const camps = list => list.map(c => withData.has(c) ? esc(c) : `<span class="text-slate-400 font-normal" title="No telecollectors in this campaign yet">${esc(c)}</span>`).join(', ');
     $(`${type}Count`).innerText = `${ranked.length} Leaders`;
     $(`${type}TableBody`).innerHTML = ranked.map(i => `<tr class="${ROW}">
         <td class="${TD} text-center font-bold text-amber-600 whitespace-nowrap">${rankBadge(i.assignedRank)}</td>
         <td class="${TD} font-bold text-slate-800">${esc(i.name)}</td>
-        <td class="${TD} font-semibold text-indigo-600">${esc(i.campaigns.join(', '))}</td>
+        <td class="${TD} font-semibold text-indigo-600">${camps(i.campaigns)}</td>
         <td class="${TD} text-center text-slate-600 font-semibold">${i.accs1}</td>
         ${metricCells(i)}
         <td class="${TD} text-center font-extrabold text-amber-600 bg-amber-50/40 border-l border-r border-amber-100 text-sm">${i.kpiRate.toFixed(1)}%</td>
-        <td class="${TD} text-center">${canEdit() ? `<button onclick="openLeaderModal('${type}', ${i.idx})" class="bg-amber-50 hover:bg-amber-100 text-amber-600 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen"></i> Edit</button>` : '<span class="text-slate-400">View</span>'}</td>
-    </tr>`).join('') || `<tr><td colspan="18" class="py-6 text-center text-xs text-slate-400">No leaders match.</td></tr>`;
+        ${admin ? `<td class="${TD} text-center"><button onclick="openLeaderModal('${type}', ${i.idx})" class="bg-amber-50 hover:bg-amber-100 text-amber-600 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen"></i> Edit</button></td>` : ''}
+    </tr>`).join('') || `<tr><td colspan="${tableCols(admin)}" class="py-6 text-center text-xs text-slate-400">No leaders match.</td></tr>`;
 }
 
 /* Campaign Summary & Race: one ranking chart per division (all campaigns), then the summary table. */
@@ -234,9 +242,9 @@ function renderCampaignSummary() {
             tip: [`Beginning ${fmtNum(c.beginning)}`] })), { series: 'Fixed Provision', format: compactPHP });
     }
 
-    $('chartRepoSub').innerText = 'Ranked by Repo (fully paid accounts)';
+    $('chartRepoSub').innerText = 'Ranked by repo units';
     renderRankingChart('chartRepo', rank('repo').map(c => ({ label: label(c), value: c.repo,
-        tip: [`${pct(c.repo, c.accs1).toFixed(1)}% of ${fmtInt(c.accs1)} accounts`] })), { series: 'Repo', format: v => fmtInt(v), axis: v => (Number.isInteger(v) ? fmtInt(v) : '') });
+        tip: [`${pct(c.repo, c.accs1).toFixed(1)}% of ${fmtInt(c.accs1)} accounts`] })), { series: 'Repo units', format: v => fmtInt(v), axis: v => (Number.isInteger(v) ? fmtInt(v) : '') });
 
     $('campaignSummaryTableBody').innerHTML = [...stats].sort((a, b) => b.effRate - a.effRate).map(c => `<tr class="${ROW}">
         <td class="${TD} font-bold text-indigo-600">${esc(c.name)}</td><td class="${TD} text-center text-slate-600 font-semibold">${c.accs1}</td>${metricCells(c)}</tr>`).join('')

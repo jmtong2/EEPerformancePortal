@@ -20,7 +20,7 @@ const LOCAL_STARTER_ACCOUNTS = [
 ];
 
 /* ---------- General ---------- */
-const APP_VERSION = 'v8';                                    // "Performance Portal v8" — shown to Admin only
+const APP_VERSION = 'v9';                                    // "Performance Portal v9", shown to Admin only
 const MIN_PASSWORD_LENGTH = 6;                               // minimum length for new passwords (8+ is safer)
 const USERNAME_EMAIL_DOMAIN = 'eagleeye-portal.example.com';  // usernames are stored as username@this-domain (no e-mails are sent)
 const INACTIVITY_LIMIT = 10 * 60 * 1000;                     // auto-logout after 10 minutes idle

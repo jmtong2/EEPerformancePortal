@@ -1,5 +1,5 @@
-/* Excel and PDF export — Admin only.
-   · Excel: always ALL data — INFO, Company Collection / Provision / Repo, Curing, Recovery, TL, OM & AOM, GM,
+/* Excel and PDF export (Admin only).
+   · Excel: always ALL data: INFO, Company Collection / Provision / Repo, Curing, Recovery, TL, OM & AOM, GM,
      Campaign Summary, Entries Log, LEADERS, HOLIDAYS. The file can be imported back (Data → Import Excel):
      Curing, Recovery, LEADERS and HOLIDAYS are read; the other sheets are reports.
    · PDF: printable report; follows the campaign filter currently selected on the dashboard. */
@@ -77,8 +77,8 @@ function excelCompanySheet(tab) {
     const byCampaign = companyRows(state.collectors, 'campaign', 'all');
     const cols = coExportCols(tab);
     return excelBlocks([
-        { title: `${CO_TITLES[tab]} — COMPANY TOTAL`, sub: progText(total.prog), cols: [['BUCKET', r => r.label], ...cols.slice(1)], rows: total.rows },
-        { title: `${CO_TITLES[tab]} — BY CAMPAIGN`, cols: [['CAMPAIGN', r => r.label], ...cols.slice(1)], rows: byCampaign.rows }
+        { title: `${CO_TITLES[tab]}: COMPANY TOTAL`, sub: progText(total.prog), cols: [['BUCKET', r => r.label], ...cols.slice(1)], rows: total.rows },
+        { title: `${CO_TITLES[tab]}: BY CAMPAIGN`, cols: [['CAMPAIGN', r => r.label], ...cols.slice(1)], rows: byCampaign.rows }
     ]);
 }
 
@@ -93,13 +93,13 @@ async function exportExcel() {
             const prog = bdProgress(effectiveAsOf());
             const wb = XLSX.utils.book_new();
             const add = (ws, name) => XLSX.utils.book_append_sheet(wb, ws, name);
-            add(XLSX.utils.aoa_to_sheet([['EAGLE EYE PERFORMANCE PORTAL — DATA EXPORT'], [], ['MONTH', currentPeriod()], ['ON TRACK UP TO', prog.asOf],
+            add(XLSX.utils.aoa_to_sheet([['EAGLE EYE PERFORMANCE PORTAL DATA EXPORT'], [], ['MONTH', currentPeriod()], ['ON TRACK UP TO', prog.asOf],
                 ['BUSINESS DAYS', `${prog.elapsed} of ${prog.total}`], ['EXPORTED', stamp]]), 'INFO');
             add(excelCompanySheet('co-collection'), 'Company Collection');
             add(excelCompanySheet('co-provision'), 'Company Provision');
             add(excelCompanySheet('co-repo'), 'Company Repo');
-            add(excelSheet(`CURING TELECOLLECTORS — ${stamp}`, TELE_EXPORT, rankedTeles('curing')), 'Curing');
-            add(excelSheet(`RECOVERY TELECOLLECTORS — ${stamp}`, TELE_EXPORT, rankedTeles('recovery')), 'Recovery');
+            add(excelSheet(`CURING TELECOLLECTORS (${stamp})`, TELE_EXPORT, rankedTeles('curing')), 'Curing');
+            add(excelSheet(`RECOVERY TELECOLLECTORS (${stamp})`, TELE_EXPORT, rankedTeles('recovery')), 'Recovery');
             add(excelSheet('TEAM LEADERS (TL)', LEADER_EXPORT, rankedLeaders('tl')), 'TL');
             add(excelSheet('OPERATION MANAGERS & AOM', LEADER_EXPORT, rankedLeaders('om')), 'OM & AOM');
             add(excelSheet('GENERAL MANAGERS (GM)', LEADER_EXPORT, rankedLeaders('gm')), 'GM');

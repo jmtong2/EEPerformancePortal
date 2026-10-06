@@ -7,14 +7,14 @@ let Backend = null; // SupabaseBackend (set in app.js)
 
 function emptyState() {
     return { campaigns: [], collectors: [], leaders: { tl: [], om: [], gm: [] }, entries: [], kpi: null, lastImportAt: 0, snapshot: null,
-        currentPeriod: null, asOf: null, holidays: [], resetRequests: [] };
+        currentPeriod: null, asOf: null, holidays: [], resetRequests: [], schemaVersion: null };
 }
 
 /* ---------- roles ---------- */
 const ROLE = { ADMIN: 'Admin', MGMT: 'Management', ANALYST: 'Analyst' };
 const ROLES = [ROLE.ADMIN, ROLE.MGMT, ROLE.ANALYST];
-const isAdmin = () => !!currentUser && currentUser.role === ROLE.ADMIN;                                   // users + Data menu
-const canEdit = () => !!currentUser && (currentUser.role === ROLE.ADMIN || currentUser.role === ROLE.MGMT); // teles, TL/OM/GM, daily entries
+const isAdmin = () => !!currentUser && currentUser.role === ROLE.ADMIN;                                   // users, TL/OM/GM, Data menu
+const canEdit = () => !!currentUser && (currentUser.role === ROLE.ADMIN || currentUser.role === ROLE.MGMT); // teles, daily entries
 const canChangeOwnPassword = () => canEdit();                                                             // Analysts cannot
 
 /* ---------- names & keys ---------- */

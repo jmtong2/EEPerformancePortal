@@ -125,7 +125,7 @@ function setCompanyBucket(b) { companyBucket = ['curing', 'recovery'].includes(b
 function renderCompany(tab, list, scopeText) {
     const { prog, rows } = companyRows(list);
     const cols = CO_COLS[tab];
-    $('coTitle').innerText = `${CO_TITLES[tab]} — ${scopeText}`;
+    $('coTitle').innerHTML = `<span>${esc(CO_TITLES[tab])}</span><span class="bg-white border border-slate-200 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full">${esc(scopeText)}</span>`;
     const day = prog.asOf === todayStr() ? `today, ${dateLabel(prog.asOf)}` : dateLabel(prog.asOf);
     $('coAsOf').innerText = `ON TRACK as of ${day} · business day ${prog.elapsed} of ${prog.total} in ${periodLabel(prog.period)} · ON TRACK = monthly figure ÷ ${prog.total} × ${prog.elapsed}`;
     [['coViewTotal', 'total'], ['coViewCampaign', 'campaign']].forEach(([id, v]) => {
@@ -150,12 +150,64 @@ function renderCompany(tab, list, scopeText) {
     $('coNotes').classList.toggle('hidden', !notes.length);
 
     $('coChartWrap').classList.toggle('hidden', tab !== 'co-repo' || !list.length);
-    if (tab === 'co-repo' && list.length) {
-        const parts = rows.filter(r => !r.total);
-        renderGroupedChart('coRepoChart', parts.map(r => r.label), [
-            { label: 'Actual', data: parts.map(r => r.s.repo), color: CHART.blue },
-            { label: 'On track', data: parts.map(r => r.t.repo), color: CHART.orange },
-            { label: 'Same period', data: parts.map(r => r.s.lmSpRepo), color: CHART.aqua }
-        ], { title: 'Repo: actual vs on track', format: v => fmtUnits(v) });
-    }
+    if (tab === 'co-repo' && list.length) renderRepoChart(rows);
+}
+
+/* Repo chart: units by age (the x-axis is the age) beside a TARGET / ACTUAL / % panel. Not split by Curing / Recovery:
+     Company total view = one series, the company total · By campaign view = one series per campaign.
+   A campaign keeps the same colour in both parts (charts.js campaignColor), so its bars and its target row match.
+   The figures come from the table's own columns (CO_COLS), so the chart always agrees with the table below it. */
+const REPO_AGES = [[['2ND MONTH'], 'repoAge2'], [['3RD MONTH'], 'repoAge3'], [['4TH MONTH', 'AND UP'], 'repoAge4']];
+const repoCol = (header, r) => { const c = CO_COLS['co-repo'].find(x => x[0] === header); return c[1](r.s, r.t); };
+
+function renderRepoChart(rows) {
+    const total = companyView !== 'campaign';
+    const parts = rows.filter(r => (total ? r.total : !r.total));
+    const colorOf = r => (total ? CHART.blue : campaignColor(r.label));
+    const bucketText = { all: 'all buckets', curing: 'Curing only', recovery: 'Recovery only' }[companyBucket];
+    $('coRepoAgeSub').innerText = total ? 'Company total (Curing and Recovery together)' : `One bar per campaign · ${bucketText}`;
+
+    // Units by age. More than 8 campaigns: the ones past the 8 colours are added up as OTHER.
+    const series = [], other = { label: 'OTHER', data: [0, 0, 0], color: CHART.axis, n: 0 };
+    parts.forEach(r => {
+        const data = REPO_AGES.map(([, f]) => r.s[f]), color = colorOf(r);
+        if (color) series.push({ label: total ? 'Company total' : r.label, data, color });
+        else { other.n++; data.forEach((v, i) => other.data[i] = round2(other.data[i] + v)); }
+    });
+    if (other.n) series.push({ ...other, label: `OTHER (${other.n} campaigns)` });
+    renderGroupedChart('coRepoChart', REPO_AGES.map(([l]) => l), series,
+        { title: 'Repo units by age', format: v => fmtUnits(v), valueLabels: true, emptyText: 'No repo units by age in the data yet (2nd Month, 3rd Month, 4th Month and Up).' });
+
+    // TARGET (grey track), ACTUAL (bar) and ON TRACK today (tick), with the same % as the table: ON TRACK ÷ ACTUAL.
+    $('coRepoLegend').innerHTML = `
+        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-2 rounded-sm" style="background:${total ? CHART.blue : CHART.ink}"></span>Actual${total ? '' : ' (campaign colour)'}</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-slate-200"></span>Target (month)</span>
+        <span class="inline-flex items-center gap-1.5"><span class="inline-block w-0.5 h-3 bg-slate-900"></span>On track (today)</span>
+        <span>Figures: actual / target · % = on track ÷ actual</span>`;
+    $('coRepoBullets').innerHTML = repoBulletsHtml(parts.map(r => ({
+        label: r.label, color: colorOf(r) || CHART.axis,
+        target: repoCol('TARGET', r), actual: repoCol('ACTUAL', r), onTrack: repoCol('ON TRACK', r), pct: repoCol('%', r)
+    })));
+}
+
+// One row per item: grey track = TARGET for the month, coloured bar = ACTUAL, black tick = ON TRACK today. All rows share one scale.
+function repoBulletsHtml(items) {
+    const max = Math.max(0, ...items.flatMap(i => [i.target || 0, i.actual || 0, i.onTrack || 0]));
+    if (!max) return '<p class="text-xs text-slate-400">No repo TARGET or ACTUAL in the data yet.</p>';
+    const w = v => `${Math.max(0, Math.min(100, (v / max) * 100)).toFixed(2)}%`;
+    const txt = (v, f = fmtUnits) => (v === null || v === undefined ? '—' : f(v));
+    return items.map(i => {
+        const tip = `${i.label}: actual ${fmtUnits(i.actual)} · target ${txt(i.target)} · on track today ${txt(i.onTrack)} · % ${txt(i.pct, v => v.toFixed(1) + '%')}`;
+        return `<div title="${esc(tip)}">
+            <div class="flex items-baseline justify-between gap-3 text-[11px]">
+                <span class="font-semibold text-slate-700 truncate">${esc(i.label)}</span>
+                <span class="text-slate-500 whitespace-nowrap"><b class="text-slate-900">${fmtUnits(i.actual)}</b> / ${txt(i.target)} · <b class="text-slate-900">${txt(i.pct, v => v.toFixed(1) + '%')}</b></span>
+            </div>
+            <div class="relative h-4 mt-1">
+                ${i.target === null ? '' : `<div class="absolute inset-y-0 left-0 rounded bg-slate-200" style="width:${w(i.target)}"></div>`}
+                <div class="absolute left-0 top-1 bottom-1 rounded" style="width:${w(i.actual)};background:${i.color}"></div>
+                ${i.onTrack === null ? '' : `<div class="absolute -top-0.5 -bottom-0.5 w-0.5 rounded-full bg-slate-900" style="left:${w(i.onTrack)};transform:translateX(-50%)"></div>`}
+            </div>
+        </div>`;
+    }).join('');
 }

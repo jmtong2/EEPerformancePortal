@@ -1,8 +1,17 @@
-/* Charts (Chart.js, loaded on first use): campaign ranking bars and the grouped Repo chart.
-   Colours come from a colour-blind-checked palette: one blue for single-series rankings; blue / orange / aqua for the
-   grouped Repo chart (fixed per series, never by rank). Every chart has a table with the same figures next to it. */
+/* Charts (Chart.js, loaded on first use): campaign ranking bars and the Repo-by-age chart.
+   Colours come from a colour-blind-checked palette: one blue for single-series charts; in the by-campaign Repo chart
+   each campaign has its own fixed colour (never by rank, so filtering never repaints a campaign).
+   Every chart has a table with the same figures next to it. */
 
 const CHART = { blue: '#2a78d6', orange: '#eb6834', aqua: '#1baf7a', grid: '#e1e0d9', axis: '#898781', ink: '#334155', font: "'Inter', sans-serif" };
+// Categorical colours in a fixed order (checked for colour-blind safety as neighbouring bars). Never generate a 9th colour.
+const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+// A campaign's colour = its place in the alphabetical list of all campaigns with telecollectors (not the filtered list,
+// so the campaign filter and search never repaint a campaign). null past the 8th.
+function campaignColor(name) {
+    const i = uniq(state.collectors.map(c => c.campaign)).sort().indexOf(name);
+    return i >= 0 && i < SERIES_COLORS.length ? SERIES_COLORS[i] : null;
+}
 const chartRegistry = {};
 
 async function ensureCharts() {
@@ -94,30 +103,39 @@ async function renderRankingChart(canvasId, rows, opt) {
     });
 }
 
-/* Vertical grouped bars. series: [{ label, data: [number | null], color }]; series without any value are left out. */
+/* Vertical grouped bars. labels: text, or an array of lines. series: [{ label, data: [number | null], color }];
+   series without any value are left out. opt: { title, format, valueLabels (numbers on the bars of a one-series chart),
+   emptyText (shown instead of a chart when every value is 0 or blank) }. */
 async function renderGroupedChart(canvasId, labels, series, opt) {
     let ChartJs;
     try { ChartJs = await ensureCharts(); } catch (e) { destroyChart(canvasId); chartMessage(canvasId, 'Chart not available (no internet?). The table below has the same figures.'); return; }
     destroyChart(canvasId);
     const shown = series.filter(s => s.data.some(v => v !== null && v !== undefined));
-    if (!labels.length || !shown.length) return chartMessage(canvasId, 'No data yet.');
+    if (!labels.length || !shown.length) return chartMessage(canvasId, opt.emptyText || 'No data yet.');
+    if (opt.emptyText && shown.every(s => s.data.every(v => !v))) return chartMessage(canvasId, opt.emptyText);
     chartMessage(canvasId, '');
-    $(canvasId).setAttribute('aria-label', opt.title + ': ' + labels.map((l, i) => `${l} ` + shown.map(s => `${s.label} ${s.data[i] === null ? 'no data' : opt.format(s.data[i])}`).join(', ')).join('; '));
+    const text = l => [].concat(l).join(' ');
+    const labelBars = !!opt.valueLabels && shown.length === 1;
+    const wholeNumbers = shown.every(s => s.data.every(v => v === null || v === undefined || Number.isInteger(v)));
+    $(canvasId).setAttribute('aria-label', opt.title + ': ' + labels.map((l, i) => `${text(l)} ` + shown.map(s => `${s.label} ${s.data[i] === null ? 'no data' : opt.format(s.data[i])}`).join(', ')).join('; '));
     chartRegistry[canvasId] = new ChartJs($(canvasId), {
         type: 'bar',
         data: { labels, datasets: shown.map(s => ({ label: s.label, data: s.data, backgroundColor: s.color, borderRadius: 4, borderSkipped: 'start',
-            maxBarThickness: 24, categoryPercentage: 0.7, barPercentage: 0.9 })) },
+            maxBarThickness: labelBars ? 56 : 24, categoryPercentage: 0.7, barPercentage: 0.9 })) },
         options: {
             responsive: true, maintainAspectRatio: false, animation: false,
+            layout: { padding: { top: labelBars ? 18 : 0 } },
             scales: {
                 y: { beginAtZero: true, grid: { color: CHART.grid, drawTicks: false }, border: { display: false },
-                    ticks: { color: CHART.axis, font: { size: 10 }, padding: 6, maxTicksLimit: 6, callback: v => opt.format(v) } },
+                    ticks: { color: CHART.axis, font: { size: 10 }, padding: 6, maxTicksLimit: 6, precision: wholeNumbers ? 0 : undefined, callback: v => opt.format(v) } },
                 x: { grid: { display: false }, border: { color: CHART.grid }, ticks: { color: CHART.ink, font: { size: 11, weight: '600' }, autoSkip: false, maxRotation: 45 } }
             },
             plugins: {
                 legend: { display: shown.length > 1, position: 'top', align: 'start', labels: { color: CHART.ink, boxWidth: 12, boxHeight: 12, padding: 14, font: { size: 11, weight: '600' } } },
-                tooltip: chartTooltip({ label: c => `${c.dataset.label}: ${c.raw === null ? 'no data' : opt.format(c.raw)}` })
+                tooltip: chartTooltip({ label: c => `${c.dataset.label}: ${c.raw === null ? 'no data' : opt.format(c.raw)}` }),
+                eeValueLabels: labelBars ? { format: opt.format } : false
             }
-        }
+        },
+        plugins: labelBars ? [eeValueLabels] : []
     });
 }

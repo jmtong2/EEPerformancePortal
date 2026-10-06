@@ -1,4 +1,4 @@
-# Eagle Eye Performance Portal v8
+# Eagle Eye Performance Portal v9
 
 A dashboard for company, campaign, telecollector, TL, OM/AOM and GM performance at Eagle Eye Business & Collection Services.
 
@@ -45,10 +45,12 @@ Before going further:
 - **Blank cells:** a blank TO RETAIN, TARGET or SAME PERIOD means "not provided" and shows as "—". Other blank cells count as 0.
 
 ## What's on the dashboard
+- **Cards:** Total Collectibles · Collection Total (Efficiency Rate) · Penalty Recovered (Penalty Rate = Penalty ÷ Collection) · Fixed Provision Total (ACH %) · Repo Units (% of accounts).
 - **Company tabs: Collection · Provision · Repo.** View by company total or by campaign.
   - **ON TRACK** = monthly figure ÷ business days in the month × business days up to today (today included). Business days are Monday–Friday minus holidays.
   - **ON TRACK %** = On Track ÷ actual.
   - **SAME PERIOD** = last month at the same point of the month. **SAME PERIOD VARIANCE** = this month − Same Period.
+  - **Repo chart:** repo units by age (2nd month, 3rd month, 4th month and up) on the x-axis, next to a **Target, actual and %** panel: grey track = TARGET for the month, coloured bar = ACTUAL, black tick = ON TRACK today, % = ON TRACK ÷ ACTUAL. *Company total* shows the company as a whole; *By campaign* shows each campaign in its own colour. It is not split by Curing / Recovery.
 - **Same Period (Collection) card**, upper right.
 - **Telecollector / TL / OM & AOM / GM rankings** by KPI Rate.
   - Standard KPI targets and weights: Collection 40% with weights 35 (Curing) / 30 (Recovery); Penalty 10% / 6%, weights 30 / 25; Provision 55% / 70%, weights 25 / 35; Repo 2%, weight 10.
@@ -56,12 +58,28 @@ Before going further:
 - **Campaign Summary & Race charts** and the summary table.
 - **Entries Log** (Admin and Management).
 
+## TL and OM & AOM lists
+v9 loads the standard lists once (in `js/data/defaults.js` and `database/supabase-setup.sql`):
+
+| TL | Handles | OM & AOM | Handles |
+|---|---|---|---|
+| Richmond Oliveros | Asialink | Jayme Ann Pil | Asialink |
+| Jose Angelo Manarpiis | SureCycle, South Asialink, WiseFund | Roxell Vistal | Asialink |
+| John Lester Mamaril | Global Dominion, Global Cebuana | Nichole Dela Cruz | South Asialink, WiseFund, SureCycle |
+| John Cerlo Calipes | Cepat | Marheniel Gado | South Asialink, WiseFund, SureCycle |
+| | | Cecile Marie Solanoy | Global Dominion, Global Cebuana |
+| | | Eloisa Jane Ballesteros | Cepat |
+
+After that, only the **Admin** changes them: **Add TL / Add OM / AOM / Add GM** adds a person, and **Edit** changes which campaigns they handle or removes them. The GM list is kept as it was. A handled campaign shown in grey has no telecollectors in the data yet (for example, a different spelling in the Excel file).
+
 ## Roles
 | | Admin | Management | Analyst |
 |---|:-:|:-:|:-:|
 | View dashboards, rankings, charts, Column Guide | ✅ | ✅ | ✅ |
+| ACTION columns in the tables | ✅ | ✅ telecollectors only | ❌ (view only) |
 | Daily Log-in Entry, Entries Log | ✅ | ✅ | ❌ |
-| Add / edit / delete telecollectors, TL/OM/GM | ✅ | ✅ | ❌ |
+| Add / edit / delete telecollectors | ✅ | ✅ | ❌ |
+| Add / edit / delete TL, OM & AOM, GM (and the campaigns they handle) | ✅ | ❌ | ❌ |
 | Change own password | ✅ | ✅ | ❌ |
 | Add / manage users, answer password requests | ✅ | ❌ | ❌ |
 | **Data** menu: Import · Export Excel / PDF · Month & holidays · KPI settings · New month · Undo / Reset / Delete all | ✅ | ❌ | ❌ |
@@ -75,7 +93,7 @@ eagle-eye-portal/
 ├── css/styles.css             Custom styles
 ├── js/config.js               ⚙ SETTINGS: storage mode, Supabase keys, starter accounts, limits
 ├── js/app.js                  Startup (picks Local or Supabase)
-├── js/data/defaults.js        KPI defaults, default holidays, column definitions
+├── js/data/defaults.js        KPI defaults, default holidays, standard TL / OM & AOM lists, column definitions
 ├── js/core/                   Helpers, data model, validation, business days, KPI and totals
 ├── js/backends/               supabase-backend.js (online) · local-backend.js (this browser)
 ├── js/ui/                     dashboard.js · company.js (company tabs) · charts.js

@@ -52,7 +52,7 @@ function validateTele(submit) {
     });
 
     if (f.toRetain !== null && f.beginning > 0 && f.toRetain > f.beginning) errors.push('To Retain cannot be greater than Beginning.');
-    if (f.accs1 > 0 && f.repo > f.accs1) errors.push('Repo actual (fully paid accounts) cannot be more than # of accounts.');
+    if (f.accs1 > 0 && f.repo > f.accs1) errors.push('Repo actual (units) cannot be more than # of accounts.');
     if (submit || oldKey) {
         if (!f.accs1) warnings.push('# of accounts is 0.');
         if (!f.collectibles) warnings.push('Collectibles is 0, so EFF % and On Track Collection will show 0.');

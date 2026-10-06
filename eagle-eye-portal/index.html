@@ -152,7 +152,7 @@
                 <tbody id="usersTableBody"></tbody>
             </table>
             <div class="text-[11px] text-slate-500 mt-3 space-y-1">
-                <p><b>Admin</b>: full access, the only one who can add users and use the Data menu (import/export Excel & PDF, month & holidays, KPI settings, start new month, delete/undo/reset). <b>Management</b>: edit telecollectors, TL/OM/GM and daily entries (no Data menu). <b>Analyst</b>: view only (no daily entry, no entries log, cannot change password).</p>
+                <p><b>Admin</b>: full access, the only one who can add users, add or change TL, OM &amp; AOM and GM, and use the Data menu (import/export Excel & PDF, month & holidays, KPI settings, start new month, delete/undo/reset). <b>Management</b>: add and edit telecollectors and daily entries (no Data menu, no TL / OM &amp; AOM / GM changes). <b>Analyst</b>: view only (no ACTION columns, no daily entry, no entries log, cannot change password).</p>
                 <p id="usersCloudNote" class="hidden"></p>
             </div>
         </div>
@@ -199,7 +199,7 @@
                     <div><label class="lbl text-indigo-700">On Track Figures (Collection)</label><div id="otCollection" class="ot-box"></div></div>
                     <div><label class="lbl">Fixed Provision (₱)</label><input type="number" step="0.01" min="0" id="entryFixedProv" oninput="updateEntryPreview()" class="inp" placeholder="0.00"></div>
                     <div><label class="lbl text-indigo-700">On Track Figures (Fixed Provision)</label><div id="otFixedProv" class="ot-box"></div></div>
-                    <div><label class="lbl">Repo (fully paid accts)</label><input type="number" step="1" min="0" id="entryRepo" oninput="updateEntryPreview()" class="inp" placeholder="0"></div>
+                    <div><label class="lbl">Repo (units)</label><input type="number" step="1" min="0" id="entryRepo" oninput="updateEntryPreview()" class="inp" placeholder="0"></div>
                     <div><label class="lbl text-indigo-700">On Track Figures (Repo)</label><div id="otRepo" class="ot-box"></div></div>
                     <div><label class="lbl">Penalty (₱)</label><input type="number" step="0.01" min="0" id="entryPenalty" oninput="updateEntryPreview()" class="inp" placeholder="0.00"></div>
                 </div>
@@ -236,7 +236,7 @@
                         <div><label class="lbl">Collectibles (₱)</label><input type="number" step="0.01" min="0" id="teleCollectibles" class="inp"></div>
                         <div><label class="lbl">Collection (₱)</label><input type="number" step="0.01" min="0" id="teleCollection" class="inp"></div>
                         <div><label class="lbl">Penalty (₱)</label><input type="number" step="0.01" min="0" id="telePenalty" class="inp"></div>
-                        <div class="col-span-2"><label class="lbl">Same Period (₱) <span class="font-normal text-slate-400">— last month at the same point; blank if not available</span></label><input type="number" step="0.01" min="0" id="teleSpCollection" class="inp"></div>
+                        <div class="col-span-2"><label class="lbl">Same Period (₱) <span class="font-normal text-slate-400">(last month at the same point; blank if not available)</span></label><input type="number" step="0.01" min="0" id="teleSpCollection" class="inp"></div>
                     </div>
                 </div>
                 <div class="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3">
@@ -250,7 +250,7 @@
                         <div><label class="lbl">To Retain (₱)</label><input type="number" step="0.01" min="0" id="teleToRetain" class="inp"></div>
                         <div><label class="lbl"># Of Accounts</label><input type="number" step="1" min="0" id="teleFixedAccs" class="inp"></div>
                         <div><label class="lbl">Fixed Provision (₱)</label><input type="number" step="0.01" min="0" id="teleFixedProv" class="inp"></div>
-                        <div class="col-span-4"><label class="lbl">Same Period (₱) <span class="font-normal text-slate-400">— last month's fixed provision at the same point; blank if not available</span></label><input type="number" step="0.01" min="0" id="teleSpFixedProv" class="inp"></div>
+                        <div class="col-span-4"><label class="lbl">Same Period (₱) <span class="font-normal text-slate-400">(last month's fixed provision at the same point; blank if not available)</span></label><input type="number" step="0.01" min="0" id="teleSpFixedProv" class="inp"></div>
                     </div>
                     <p class="text-[10px] text-emerald-700 mt-1">A blank To Retain means "not provided yet" (ACH % and On Track Provision show —).</p>
                 </div>
@@ -371,8 +371,8 @@
         <div class="guide-panel bg-white rounded-2xl shadow-2xl max-w-3xl w-full p-6 max-h-[92vh] overflow-y-auto">
             <div class="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <div>
-                    <h3 class="font-bold text-slate-900 text-base flex items-center gap-2"><i class="fa-solid fa-book-open text-amber-600"></i> Eagle Eye Performance Portal — Column Guide</h3>
-                    <p class="text-[11px] text-slate-500">Standard definitions used in all company, telecollector, leader and campaign tables.</p>
+                    <h3 class="font-bold text-slate-900 text-base flex items-center gap-2"><i class="fa-solid fa-book-open text-amber-600"></i> Column Guide</h3>
+                    <p class="text-[11px] text-slate-500">Eagle Eye Performance Portal · standard definitions used in all company, telecollector, leader and campaign tables.</p>
                 </div>
                 <div class="flex gap-2 no-print">
                     <button onclick="printGuide()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs"><i class="fa-solid fa-print"></i> Print / PDF</button>
@@ -463,20 +463,25 @@
             <span class="admin-only hidden">If the data was just deleted, <b>Data → Undo</b> brings it back.</span>
         </div>
 
+        <!-- Admin only: the Supabase database still runs an older database/supabase-setup.sql -->
+        <div id="upgradeNotice" class="hidden bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl p-4 text-xs font-semibold">
+            <i class="fa-solid fa-triangle-exclamation"></i> Finish the v9 upgrade: in Supabase, open <b>SQL Editor</b>, paste all of <b>database/supabase-setup.sql</b> and click <b>Run</b>. It loads the standard TL and OM &amp; AOM lists and makes TL / OM &amp; AOM / GM changes Admin-only. Your data is kept.
+        </div>
+
         <!-- KPI cards -->
         <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">TOTAL COLLECTIBLES</p><h3 id="cardCollectibles" class="text-2xl font-extrabold text-slate-900">₱0</h3><p class="text-[11px] text-slate-400 mt-1 font-medium">Assigned Portfolio</p></div>
             <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><p class="text-[10px] font-bold text-amber-600 uppercase tracking-wider mb-1">COLLECTION TOTAL</p><h3 id="cardCollection" class="text-2xl font-extrabold text-amber-600">₱0</h3><p id="cardLiqRate" class="text-[11px] text-amber-600 font-semibold mt-1"></p></div>
             <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><p class="text-[10px] font-bold text-rose-500 uppercase tracking-wider mb-1">PENALTY RECOVERED</p><h3 id="cardPenalty" class="text-2xl font-extrabold text-rose-600">₱0</h3><p id="cardPenRate" class="text-[11px] text-rose-500 font-semibold mt-1"></p></div>
             <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><p class="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">FIXED PROVISION TOTAL</p><h3 id="cardProvision" class="text-2xl font-extrabold text-emerald-600">0</h3><p id="cardProvRate" class="text-[11px] text-emerald-600 font-semibold mt-1"></p></div>
-            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><p class="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mb-1">REPO (FULLY PAID)</p><h3 id="cardRepo" class="text-2xl font-extrabold text-indigo-600">0</h3><p id="cardRepoRate" class="text-[11px] text-indigo-500 font-semibold mt-1"></p></div>
+            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><p class="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mb-1">REPO UNITS</p><h3 id="cardRepo" class="text-2xl font-extrabold text-indigo-600">0</h3><p id="cardRepoRate" class="text-[11px] text-indigo-500 font-semibold mt-1"></p></div>
         </div>
 
         <!-- Company Collection / Provision / Repo (built by js/ui/company.js) -->
         <div id="companySection" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden hidden">
             <div class="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
                 <div class="min-w-0">
-                    <h3 id="coTitle" class="font-bold text-slate-800 text-xs tracking-wide uppercase"></h3>
+                    <h3 id="coTitle" class="font-bold text-slate-800 text-xs tracking-wide uppercase flex flex-wrap items-center gap-2"></h3>
                     <p id="coAsOf" class="text-[11px] text-slate-500 mt-0.5"></p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
@@ -489,9 +494,18 @@
                     </select>
                 </div>
             </div>
-            <div id="coChartWrap" class="hidden px-5 pt-4">
-                <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Repo: actual vs on track (number of accounts)</p>
-                <div class="relative" style="height:280px"><canvas id="coRepoChart" role="img" aria-label="Repo, target repo and same period last month"></canvas></div>
+            <!-- Repo tab only: units by age (x-axis = age) beside target, actual and % (built by js/ui/company.js) -->
+            <div id="coChartWrap" class="hidden px-5 pt-4 pb-2 grid grid-cols-1 lg:grid-cols-5 gap-x-8 gap-y-5 border-b border-slate-100">
+                <div class="lg:col-span-3 min-w-0">
+                    <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Repo units by age</p>
+                    <p id="coRepoAgeSub" class="text-[11px] text-slate-500 mb-1"></p>
+                    <div class="relative" style="height:250px"><canvas id="coRepoChart" role="img" aria-label="Repo units by age"></canvas></div>
+                </div>
+                <div class="lg:col-span-2 min-w-0">
+                    <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Target, actual and %</p>
+                    <div id="coRepoLegend" class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-slate-500 mb-3"></div>
+                    <div id="coRepoBullets" class="space-y-3"></div>
+                </div>
             </div>
             <div class="overflow-x-auto"><table class="w-full text-left border-collapse"><thead id="coHead"></thead><tbody id="coBody"></tbody></table></div>
             <div id="coNotes" class="hidden px-5 py-3 text-[11px] text-slate-500 space-y-0.5 border-t border-slate-100"></div>

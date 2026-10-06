@@ -1,4 +1,4 @@
-/* Excel import — Admin only — with security validation.
+/* Excel import (Admin only), with security validation.
 
    File checks   : .xlsx/.xls only · max size · real Excel file signature (not a renamed file) ·
                    no macros (VBA) · readable / not password-protected · sheet & row limits.
@@ -11,8 +11,8 @@
 
    Understood layouts:
      · Summary_Campaign_Revised.xlsx (current): one sheet per campaign (campaign title in A1, e.g. sheet "AFC" titled
-       "Asialink") with a CURING block and a RECOVERY block — COLLECTION / PROVISION (each figure with its own
-       # OF ACCOUNTS) / REPO (2nd Month, 3rd Month, 4th Month and Up, TARGET, ACTUAL) / SAME PERIOD columns —
+       "Asialink") with a CURING block and a RECOVERY block: COLLECTION / PROVISION (each figure with its own
+       # OF ACCOUNTS) / REPO (2nd Month, 3rd Month, 4th Month and Up, TARGET, ACTUAL) / SAME PERIOD columns,
        plus "Curing" / "Recovery" summary sheets with a CAMPAIGN column. Filled summary sheets are used and the
        campaign sheets cross-check them; empty summary sheets are ignored and the campaign sheets are used.
        VARIANCE columns in the file are not read: the portal computes them.
@@ -162,14 +162,16 @@ function importHeaderMap(cells) {
     return map;
 }
 // Campaign of a per-campaign sheet: the sheet title (A1, e.g. "Asialink") or the sheet name (e.g. "AFC").
-// A name that matches an existing campaign wins, so "CEPAT" keeps matching campaign CEPAT even if the title says "Cepat Kredit".
+// A name used by the TL / OM & AOM / GM lists wins first, then a campaign already in the data, so sheet "CEPAT"
+// (titled "Cepat Kredit") is imported as CEPAT, the name the leaders handle.
 function resolveCampaign(title, sheetName) {
     const strip = s => cleanName(String(s || '').replace(/RECOVERY|CURRING|CURING/ig, ' '));
     const cands = [strip(title), strip(sheetName)].filter(c => c && NAME_RE.test(c));
-    const known = uniq([...allCampaigns(), ...leaderCampaigns()]);
-    for (const c of cands) { const k = known.find(x => slug(x) === slug(c)); if (k) return k; }
+    for (const known of [leaderCampaigns(), allCampaigns()])
+        for (const c of cands) { const k = known.find(x => slug(x) === slug(c)); if (k) return k; }
     return cands[0] || '';
-}function sheetKind(name) { const k = SHEET_KIND.find(([re]) => re.test(String(name).trim())); return k ? k[1] : null; }
+}
+function sheetKind(name) { const k = SHEET_KIND.find(([re]) => re.test(String(name).trim())); return k ? k[1] : null; }
 function sheetGrid(ws, maxRows, maxCols, reader) {
     const range = XLSX.utils.decode_range(ws['!ref']);
     const lastRow = Math.min(range.e.r, range.s.r + maxRows), lastCol = Math.min(range.e.c, maxCols);
@@ -227,8 +229,8 @@ function parseImportWorkbook(wb, r) {
             const numericCols = IMPORT_NUM_FIELDS.map(([f]) => section.map[f]).filter(c => c !== undefined);
             const hasNumbers = numericCols.some(c => typeof cells[c] === 'number' && cells[c] !== 0);
             if (!nameText) {
-                if (rawName !== null && typeof rawName !== 'string') r.warnings.push(`${sheetName} row ${rowNo}: the name cell is not text — row skipped.`);
-                else if (hasNumbers) r.warnings.push(`${sheetName} row ${rowNo}: has numbers but no name — row skipped.`);
+                if (rawName !== null && typeof rawName !== 'string') r.warnings.push(`${sheetName} row ${rowNo}: the name cell is not text; row skipped.`);
+                else if (hasNumbers) r.warnings.push(`${sheetName} row ${rowNo}: has numbers but no name; row skipped.`);
                 return;
             }
             if (/^(GRAND )?(SUB ?)?TOTALS?$/.test(importHead(nameText))) return;
@@ -383,7 +385,7 @@ function parseInfoSheet(ws, sheetName, r) {
 function parseHolidaySheet(ws, sheetName, r) {
     const rows = sheetGrid(ws, 500, 10, rawCell);
     const hi = rows.findIndex(x => x.cells.some(c => importHead(cellText(c)) === 'DATE'));
-    if (hi < 0) { r.warnings.push(`${sheetName}: no DATE header found — sheet ignored.`); return; }
+    if (hi < 0) { r.warnings.push(`${sheetName}: no DATE header found; sheet ignored.`); return; }
     const head = rows[hi].cells.map(c => importHead(cellText(c)));
     const dCol = head.indexOf('DATE'), nCol = head.findIndex(h => /^(DESCRIPTION|NAME|HOLIDAY|HOLIDAY NAME|REMARKS?)$/.test(h));
     const list = [];
@@ -391,7 +393,7 @@ function parseHolidaySheet(ws, sheetName, r) {
         const c = cells[dCol];
         if (!c || cellText(c) === '') return;
         const date = cellToYmd(c);
-        if (!date) { r.warnings.push(`${sheetName} row ${rowNo}: "${cellText(c).slice(0, 30)}" is not a date — skipped.`); return; }
+        if (!date) { r.warnings.push(`${sheetName} row ${rowNo}: "${cellText(c).slice(0, 30)}" is not a date; skipped.`); return; }
         list.push({ date, name: nCol >= 0 ? cellText(cells[nCol]).slice(0, 60) : '' });
     });
     r.holidays = sanitizeHolidays(list);
@@ -402,30 +404,30 @@ function parseHolidaySheet(ws, sheetName, r) {
 function parseLeaderSheet(ws, sheetName, r) {
     const rows = sheetGrid(ws, 500, 10, rawCell);
     const hi = rows.findIndex(x => { const h = x.cells.map(c => importHead(cellText(c))); return h.some(v => /^(TYPE|POSITION|ROLE)$/.test(v)) && h.some(v => /^(FULL ?NAME|NAME)$/.test(v)); });
-    if (hi < 0) { r.warnings.push(`${sheetName}: no TYPE / FULL NAME header found — sheet ignored.`); return; }
+    if (hi < 0) { r.warnings.push(`${sheetName}: no TYPE / FULL NAME header found; sheet ignored.`); return; }
     const head = rows[hi].cells.map(c => importHead(cellText(c)));
     const tCol = head.findIndex(v => /^(TYPE|POSITION|ROLE)$/.test(v)), nCol = head.findIndex(v => /^(FULL ?NAME|NAME)$/.test(v));
     const cCol = head.findIndex(v => /^(HANDLED CAMPAIGNS?|CAMPAIGNS?)$/.test(v));
-    if (cCol < 0) { r.warnings.push(`${sheetName}: no HANDLED CAMPAIGNS column — sheet ignored.`); return; }
+    if (cCol < 0) { r.warnings.push(`${sheetName}: no HANDLED CAMPAIGNS column; sheet ignored.`); return; }
     const out = { tl: [], om: [], gm: [] };
     rows.slice(hi + 1).forEach(({ rowNo, cells }) => {
         const typeText = importHead(cellText(cells[tCol])), name = cleanName(cellText(cells[nCol]));
         if (!typeText && !name) return;
         const where = `${sheetName} row ${rowNo}`;
         const type = /^(TL|TEAM LEADER)/.test(typeText) ? 'tl' : /^(OM|AOM|OPERATIONS? MANAGER|ASSISTANT)/.test(typeText) ? 'om' : /^(GM|GENERAL MANAGER)/.test(typeText) ? 'gm' : null;
-        if (!type) { r.warnings.push(`${where}: TYPE "${typeText.slice(0, 20)}" is not TL, OM, AOM or GM — row skipped.`); return; }
-        if (!name || !PERSON_RE.test(name) || name.replace(/[^A-ZÑ]/g, '').length < 3) { r.warnings.push(`${where}: "${name.slice(0, 40)}" is not a valid name — row skipped.`); return; }
+        if (!type) { r.warnings.push(`${where}: TYPE "${typeText.slice(0, 20)}" is not TL, OM, AOM or GM; row skipped.`); return; }
+        if (!name || !PERSON_RE.test(name) || name.replace(/[^A-ZÑ]/g, '').length < 3) { r.warnings.push(`${where}: "${name.slice(0, 40)}" is not a valid name; row skipped.`); return; }
         const campaigns = uniq(cellText(cells[cCol]).split(/[,;/\n]+/).map(x => cleanName(x)).filter(Boolean));
         const bad = campaigns.filter(c => !NAME_RE.test(c) || c.length > 60);
-        if (bad.length) r.warnings.push(`${where}: campaign "${bad[0].slice(0, 30)}" has invalid characters — left out.`);
+        if (bad.length) r.warnings.push(`${where}: campaign "${bad[0].slice(0, 30)}" has invalid characters; left out.`);
         const ok = campaigns.filter(c => !bad.includes(c));
-        if (!ok.length) { r.warnings.push(`${where}: ${name} has no handled campaigns — row skipped.`); return; }
+        if (!ok.length) { r.warnings.push(`${where}: ${name} has no handled campaigns; row skipped.`); return; }
         const ex = out[type].find(l => slug(l.name) === slug(name));
         if (ex) ex.campaigns = uniq([...ex.campaigns, ...ok]); else out[type].push({ name, campaigns: ok, where });
     });
     r.leaderSheet = sheetName;
     if (out.tl.length + out.om.length + out.gm.length) r.leaders = out;
-    else r.warnings.push(`${sheetName}: no valid leaders found — the current TL/OM/GM list is kept.`);
+    else r.warnings.push(`${sheetName}: no valid leaders found; the current TL/OM/GM list is kept.`);
 }
 
 /* ===================== 3. CONTENT VALIDATION ===================== */
@@ -449,7 +451,7 @@ function validateImportRecords(r) {
         if (!rec.beginning) rec.warnings.push('Beginning is 0');
         if (rec.name && rec.campaign && rec.team) {
             rec.key = collectorKey(rec.campaign, rec.team, rec.name);
-            if (seen.has(rec.key)) rec.errors.push(`duplicate — the same telecollector is also on ${seen.get(rec.key).where}`);
+            if (seen.has(rec.key)) rec.errors.push(`duplicate: the same telecollector is also on ${seen.get(rec.key).where}`);
             else seen.set(rec.key, rec);
         }
     });
@@ -457,12 +459,12 @@ function validateImportRecords(r) {
     const byGroup = {};
     r.records.filter(x => x.key).forEach(x => { (byGroup[`${x.campaign}|${x.team}`] = byGroup[`${x.campaign}|${x.team}`] || []).push(x); });
     Object.values(byGroup).forEach(list => list.forEach((x, i) => list.slice(i + 1).forEach(y => {
-        if (x.key !== y.key && levenshtein(slug(x.name), slug(y.name)) <= 2) r.warnings.push(`Similar names in ${x.campaign} ${x.team}: "${x.name}" (${x.where}) and "${y.name}" (${y.where}) — same person?`);
+        if (x.key !== y.key && levenshtein(slug(x.name), slug(y.name)) <= 2) r.warnings.push(`Similar names in ${x.campaign} ${x.team}: "${x.name}" (${x.where}) and "${y.name}" (${y.where}). Same person?`);
     })));
     // Similar to an existing telecollector under a different spelling
     r.records.filter(x => x.key && !findCollector(x.key)).forEach(x => {
         const twin = state.collectors.find(c => c.campaign === x.campaign && c.team === x.team && levenshtein(slug(c.name), slug(x.name)) <= 2);
-        if (twin) r.warnings.push(`"${x.name}" (${x.where}) looks like existing "${twin.name}" in ${x.campaign} ${x.team} — a spelling change will create a new telecollector.`);
+        if (twin) r.warnings.push(`"${x.name}" (${x.where}) looks like existing "${twin.name}" in ${x.campaign} ${x.team}. A spelling change will create a new telecollector.`);
     });
     r.records.forEach(x => {
         x.errors.forEach(e => r.errors.push(`${x.where}${x.name ? ' (' + x.name + ')' : ''}: ${e}`));
@@ -470,10 +472,10 @@ function validateImportRecords(r) {
     });
     if ((r.campaignNames || []).length) r.notes.push(`Campaign names taken from the sheets: ${r.campaignNames.join(', ')}.`);
     const missing = (fields, text) => { if (!fields.some(f => r.present.has(f))) r.notes.push(text); };
-    missing(['toRetain'], 'No TO RETAIN column — To Retain stays blank (%, ON TRACK PROVISION and PROVISION VARIANCE show "—").');
-    missing(['targetRepo'], 'No repo TARGET column — the repo TARGET and ON TRACK stay blank.');
-    missing(['ending', 'endingAccs', 'beginningAccs', 'toRetainAccs', 'fixedAccs'], 'No ENDING / # OF ACCOUNTS provision columns — they are set to 0 (use the Summary_Campaign_Revised layout).');
-    missing(['lmSpCollection', 'lmSpFixedProv', 'lmSpRepo'], 'No SAME PERIOD columns — SAME PERIOD and SAME PERIOD VARIANCE stay blank.');
+    missing(['toRetain'], 'No TO RETAIN column, so To Retain stays blank (%, ON TRACK PROVISION and PROVISION VARIANCE show "—").');
+    missing(['targetRepo'], 'No repo TARGET column, so the repo TARGET and ON TRACK stay blank.');
+    missing(['ending', 'endingAccs', 'beginningAccs', 'toRetainAccs', 'fixedAccs'], 'No ENDING / # OF ACCOUNTS provision columns, so they are set to 0 (use the Summary_Campaign_Revised layout).');
+    missing(['lmSpCollection', 'lmSpFixedProv', 'lmSpRepo'], 'No SAME PERIOD columns, so SAME PERIOD and SAME PERIOD VARIANCE stay blank.');
 }
 
 // Month / "as of" date / holidays / leaders from the INFO, HOLIDAYS and LEADERS sheets.
@@ -486,10 +488,10 @@ function validateImportMeta(r) {
         if (i.asOf && i.asOf > today) r.errors.push(`${where}: AS OF DATE ${i.asOf} is in the future.`);
         if (i.month && i.asOf && periodOf(i.asOf) !== i.month) r.errors.push(`${where}: AS OF DATE ${i.asOf} is not inside MONTH ${periodLabel(i.month)}.`);
         if (!i.month && i.asOf) i.month = periodOf(i.asOf);
-        if (!i.monthText && !i.asOfText) r.warnings.push(`${where}: MONTH and AS OF DATE are empty — the portal keeps ${periodLabel(currentPeriod())}.`);
+        if (!i.monthText && !i.asOfText) r.warnings.push(`${where}: MONTH and AS OF DATE are empty, so the portal keeps ${periodLabel(currentPeriod())}.`);
         if (i.month && i.month !== currentPeriod()) r.warnings.push(`This file is for ${periodLabel(i.month)}; the portal is on ${periodLabel(currentPeriod())}. Importing switches the portal to ${periodLabel(i.month)}.`);
     } else r.notes.push(`The month stays ${periodLabel(currentPeriod())} (change it in Data → Month & holidays).`);
-    if (r.holidaySheet && !(r.holidays || []).length) r.warnings.push(`${r.holidaySheet}: no holidays listed — the current holiday list is kept.`);
+    if (r.holidaySheet && !(r.holidays || []).length) r.warnings.push(`${r.holidaySheet}: no holidays listed; the current holiday list is kept.`);
     if (r.leaders) {
         const camps = new Set(r.records.map(x => x.campaign));
         ['tl', 'om', 'gm'].forEach(t => r.leaders[t].forEach(l => l.campaigns.filter(c => !camps.has(c)).forEach(c =>

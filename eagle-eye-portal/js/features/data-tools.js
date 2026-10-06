@@ -107,7 +107,7 @@ async function handleStartNewMonth() {
     const cur = currentPeriod(), next = shiftPeriod(cur, 1);
     const answer = prompt(`Close ${periodLabel(cur)} and start ${periodLabel(next)}?\n\n• This month's actuals restart at zero: collection, penalty, fixed provision (and its # of accounts) and repo (actual and ages).\n• SAME PERIOD figures are cleared until the next Excel file provides them.\n• Telecollectors, # of accounts, collectibles, ending, beginning, To Retain and repo targets are kept until you import the new month's file.\n\nYou can undo this from Data → Undo.\n\nType NEW MONTH to confirm.`);
     if (answer === null) return;
-    if (answer.trim().toUpperCase() !== 'NEW MONTH') return toast('Not started — you must type NEW MONTH exactly.', 'info');
+    if (answer.trim().toUpperCase() !== 'NEW MONTH') return toast('Not started: you must type NEW MONTH exactly.', 'info');
     try { const p = await withProgress('Starting the new month…', () => Backend.startNewMonth()); toast(`${periodLabel(p || next)} started. Use Data → Undo to go back.`, 'ok'); }
     catch (e) { toast(friendlyError(e), 'err'); }
 }
@@ -117,7 +117,7 @@ async function handleDeleteAll() {
     if (!isAdmin()) return deny('Only the Admin can delete all data.');
     const answer = prompt(`This deletes ALL ${state.collectors.length} telecollectors and the daily entries log for EVERY user.\nLeaders (TL/OM/GM), campaigns, KPI settings, month and holidays are kept.\nYou can undo this from Data → Undo.\n\nType DELETE to confirm.`);
     if (answer === null) return;
-    if (answer.trim() !== 'DELETE') return toast('Not deleted — you must type DELETE exactly.', 'info');
+    if (answer.trim() !== 'DELETE') return toast('Not deleted: you must type DELETE exactly.', 'info');
     try { await withProgress('Deleting all data…', () => Backend.deleteAllData()); toast('All data deleted. Use Data → Undo to bring it back.', 'ok'); }
     catch (e) { toast(friendlyError(e), 'err'); }
 }
@@ -138,7 +138,7 @@ async function handleReset() {
     if (!isAdmin()) return deny('Only the Admin can reset the data.');
     const answer = prompt('Reset ALL data to exactly how it was right after the last Excel import?\nChanges made since then (edits, daily entries, TL/OM/GM, KPI settings) are replaced and the entries log is cleared, for EVERY user.\nYou can undo this from Data → Undo.\n\nType RESET to confirm.');
     if (answer === null) return;
-    if (answer.trim() !== 'RESET') return toast('Not reset — you must type RESET exactly.', 'info');
+    if (answer.trim() !== 'RESET') return toast('Not reset: you must type RESET exactly.', 'info');
     try { const m = await withProgress('Resetting data…', () => Backend.resetToBaseline()); toast(`Data reset to the import of ${m.label || 'the last file'}. Use Data → Undo to go back.`, 'ok'); }
     catch (e) { toast(friendlyError(e), 'err'); }
 }

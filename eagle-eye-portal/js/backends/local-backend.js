@@ -187,10 +187,10 @@ const EELocal = (() => {
             const d = s.db; if (!isEditor(d, uid)) raise('Only Admin and Management can delete telecollectors');
             d.collectors = d.collectors.filter(x => x.key !== a.p_key);
         } },
+        // TL / OM & AOM / GM, campaigns, KPI settings, month and holidays: Admin only (v9).
         save_config: { params: ['p'], run: (s, uid, a) => {
-            const d = s.db; if (!isEditor(d, uid)) raise('Only Admin and Management can change settings');
+            const d = s.db; if (!isAdmin(d, uid)) raise('Only the Admin can change TL / OM & AOM / GM, KPI settings, the month and holidays');
             const p = a.p || {};
-            if (['kpi', 'current_period', 'as_of', 'holidays'].some(k => k in p) && !isAdmin(d, uid)) raise('Only the Admin can change KPI settings, the month and holidays');
             if ('campaigns' in p && !Array.isArray(p.campaigns)) raise('Invalid campaigns');
             if ('leaders' in p && (!p.leaders || typeof p.leaders !== 'object' || Array.isArray(p.leaders))) raise('Invalid TL/OM/GM data');
             if ('holidays' in p && !Array.isArray(p.holidays)) raise('Invalid holidays');
@@ -217,7 +217,7 @@ const EELocal = (() => {
             if (a.p_records.length > 5000) raise('Too many rows (maximum 5000)');
             const keys = a.p_records.map(x => x.key); if (new Set(keys).size !== keys.length) raise('ON CONFLICT DO UPDATE command cannot affect row a second time', '21000');
             const meta = a.p_meta || {};
-            takeSnapshot(d, uid, `Excel import (${a.p_mode === 'replace' ? 'replace all' : 'update & add'}) – ${String(a.p_label || '').slice(0, 120)}`);
+            takeSnapshot(d, uid, `Excel import (${a.p_mode === 'replace' ? 'replace all' : 'update & add'}): ${String(a.p_label || '').slice(0, 120)}`);
             if (a.p_mode === 'replace') { d.entries = []; d.collectors = []; }
             try { upsert(d, a.p_records, (me(d, uid) || {}).username); }
             catch (e) { if (e.code === '23514') raise('Some rows have invalid values (check names, negative values, and To Retain vs Beginning)'); throw e; }
@@ -374,10 +374,28 @@ const EELocal = (() => {
         return client;
     }
 
-    /* ---------- once per browser: v8 update + the starter accounts (js/config.js LOCAL_STARTER_ACCOUNTS) ---------- */
+    /* ---------- v9: the standard TL and OM & AOM lists (js/data/defaults.js), same as the v9 block of supabase-setup.sql ----------
+       A leader campaign that has a different name in the data (e.g. CEPAT vs "CEPAT KREDIT") is matched to it when exactly one
+       campaign in the data starts with that name. The undo copy and the last-import copy get the same lists, so Undo and
+       "Reset to last imported file" don't bring old lists back. The GM list is kept. */
+    function seedLeaders(d) {
+        const inData = [...new Set(d.collectors.map(c => c.campaign))];
+        const match = name => {
+            if (inData.includes(name)) return name;
+            const longer = inData.filter(c => c.startsWith(name + ' '));
+            return longer.length === 1 ? longer[0] : name;
+        };
+        const list = arr => arr.map(l => ({ name: l.name, campaigns: [...new Set(l.campaigns.map(match))] }));
+        const leaders = { tl: list(DEFAULT_LEADERS.tl), om: list(DEFAULT_LEADERS.om), gm: ((d.config.leaders || {}).gm) || [] };
+        d.config.leaders = leaders;
+        [d.baseline, d.snapshot_data].forEach(b => { if (b && b.data && b.data.config) b.data.config.leaders = clone(leaders); });
+    }
+
+    /* ---------- once per browser: v8 and v9 updates + the starter accounts (js/config.js LOCAL_STARTER_ACCOUNTS) ---------- */
     async function prepareStore() {
         let s = readStore();
         if (!s.v8) { s.db.config.kpi = null; s.db.reset_requests = s.db.reset_requests || []; s.v8 = true; writeStore(s); }   // KPI back to the standard targets and weights
+        if (!s.v9) { seedLeaders(s.db); s.v9 = true; writeStore(s); }
         if (s.starterSeeded) return;
         const starters = typeof LOCAL_STARTER_ACCOUNTS !== 'undefined' && Array.isArray(LOCAL_STARTER_ACCOUNTS) ? LOCAL_STARTER_ACCOUNTS : [];
         const hashed = await Promise.all(starters.map(a => hashPassword(a.password)));

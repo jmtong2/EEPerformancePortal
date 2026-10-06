@@ -137,6 +137,7 @@ const SupabaseBackend = {
         state.currentPeriod = d.current_period || null;
         state.asOf = d.as_of || null;
         state.holidays = sanitizeHolidays(d.holidays);
+        state.schemaVersion = d.schema_version === undefined || d.schema_version === null ? null : num(d.schema_version);
     },
     async fetchEntries() {
         if (!this.isEditorProfile()) { state.entries = []; return; }

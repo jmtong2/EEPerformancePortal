@@ -1,13 +1,13 @@
 -- =====================================================================
--- Eagle Eye Performance Portal v8 — Supabase database setup / upgrade
+-- Eagle Eye Performance Portal v9: Supabase database setup / upgrade
 -- Run in: Supabase Dashboard -> SQL Editor -> New query -> paste ALL of this -> Run.
 --   · New project      : creates everything.
---   · Existing project : upgrades it in place to v8 and keeps your data.
+--   · Existing project : upgrades it in place to v9 and keeps your data.
 -- Safe to run again at any time; it never deletes data.
 --
 -- Roles (profiles.role):
---   Admin       - everything + users + the Data menu (import/export, period & holidays, KPI, new month, delete/undo/reset)
---   Management  - edit telecollectors, TL/OM/GM and daily entries (no Data menu)
+--   Admin       - everything + users + TL / OM & AOM / GM + the Data menu (import/export, period & holidays, KPI, new month, delete/undo/reset)
+--   Management  - add and edit telecollectors and daily entries (no Data menu, no TL / OM & AOM / GM changes)
 --   Analyst     - view only
 --
 -- Security model: tables are READ-ONLY through the API (row-level security). Every change goes through
@@ -163,6 +163,56 @@ do $$
 begin
   if coalesce((select schema_version from public.config where id = 1), 0) < 8 then
     update public.config set kpi = null, schema_version = 8 where id = 1;
+  end if;
+end $$;
+
+-- ========================== ONE-TIME v9 UPGRADE ==========================
+-- The standard TL and OM & AOM lists (the same as DEFAULT_LEADERS in js/data/defaults.js). After this the Admin changes
+-- them in the portal (TL and OM & AOM tabs). The GM list is kept. A campaign that is named differently in the data
+-- (e.g. "CEPAT KREDIT" for CEPAT) is matched when exactly one campaign in the data starts with that name.
+-- The undo copy and the last-import copy get the same lists, so Undo and "Reset to last imported file" keep them.
+create or replace function public._v9_campaign(p text) returns text
+language sql stable set search_path = public as $$
+  select case
+    when exists (select 1 from collectors where campaign = p) then p
+    when (select count(distinct campaign) from collectors where campaign like p || ' %') = 1
+      then (select min(campaign) from collectors where campaign like p || ' %')
+    else p end;
+$$;
+create or replace function public._v9_leaders(p jsonb) returns jsonb
+language sql stable set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('name', l->>'name', 'campaigns',
+           (select jsonb_agg(_v9_campaign(c) order by o) from jsonb_array_elements_text(l->'campaigns') with ordinality as y(c, o)))
+         order by n), '[]'::jsonb)
+  from jsonb_array_elements(p) with ordinality as x(l, n);
+$$;
+revoke execute on function public._v9_campaign(text) from public, anon, authenticated;
+revoke execute on function public._v9_leaders(jsonb) from public, anon, authenticated;
+
+do $$
+declare v_leaders jsonb;
+begin
+  if coalesce((select schema_version from public.config where id = 1), 0) < 9 then
+    select jsonb_build_object(
+      'tl', public._v9_leaders('[
+        {"name":"RICHMOND OLIVEROS","campaigns":["ASIALINK"]},
+        {"name":"JOSE ANGELO MANARPIIS","campaigns":["SURECYCLE","SOUTH ASIALINK","WISEFUND"]},
+        {"name":"JOHN LESTER MAMARIL","campaigns":["GLOBAL DOMINION","GLOBAL CEBUANA"]},
+        {"name":"JOHN CERLO CALIPES","campaigns":["CEPAT"]}
+      ]'::jsonb),
+      'om', public._v9_leaders('[
+        {"name":"JAYME ANN PIL","campaigns":["ASIALINK"]},
+        {"name":"ROXELL VISTAL","campaigns":["ASIALINK"]},
+        {"name":"NICHOLE DELA CRUZ","campaigns":["SOUTH ASIALINK","WISEFUND","SURECYCLE"]},
+        {"name":"MARHENIEL GADO","campaigns":["SOUTH ASIALINK","WISEFUND","SURECYCLE"]},
+        {"name":"CECILE MARIE SOLANOY","campaigns":["GLOBAL DOMINION","GLOBAL CEBUANA"]},
+        {"name":"ELOISA JANE BALLESTEROS","campaigns":["CEPAT"]}
+      ]'::jsonb),
+      'gm', coalesce(c.leaders->'gm', '[]'::jsonb))
+    into v_leaders from public.config c where c.id = 1;
+    update public.config set leaders = v_leaders, schema_version = 9 where id = 1;
+    update public.baseline set data = jsonb_set(data, '{config,leaders}', v_leaders) where data ? 'config';
+    update public.snapshot_data set data = jsonb_set(data, '{config,leaders}', v_leaders) where data ? 'config';
   end if;
 end $$;
 
@@ -396,14 +446,11 @@ begin
   delete from collectors where key = p_key;
 end $$;
 
--- Campaigns and TL/OM/GM: Admin + Management. KPI settings, month, "as of" date and holidays: Admin only.
+-- TL / OM & AOM / GM, campaigns, KPI settings, month, "as of" date and holidays: Admin only (v9).
 create or replace function public.save_config(p jsonb) returns void
 language plpgsql security definer set search_path = public as $$
 begin
-  if not is_editor() then raise exception 'Only Admin and Management can change settings'; end if;
-  if (p ? 'kpi' or p ? 'current_period' or p ? 'as_of' or p ? 'holidays') and not is_admin() then
-    raise exception 'Only the Admin can change KPI settings, the month and holidays';
-  end if;
+  if not is_admin() then raise exception 'Only the Admin can change TL / OM & AOM / GM, KPI settings, the month and holidays'; end if;
   if p ? 'campaigns' and jsonb_typeof(p->'campaigns') <> 'array' then raise exception 'Invalid campaigns'; end if;
   if p ? 'leaders' and jsonb_typeof(p->'leaders') <> 'object' then raise exception 'Invalid TL/OM/GM data'; end if;
   if p ? 'holidays' and jsonb_typeof(p->'holidays') <> 'array' then raise exception 'Invalid holidays'; end if;
@@ -456,7 +503,7 @@ begin
   end if;
   if jsonb_array_length(p_records) > 5000 then raise exception 'Too many rows (maximum 5000)'; end if;
 
-  perform _take_snapshot(format('Excel import (%s) – %s', case when p_mode = 'replace' then 'replace all' else 'update & add' end, left(coalesce(p_label, ''), 120)));
+  perform _take_snapshot(format('Excel import (%s): %s', case when p_mode = 'replace' then 'replace all' else 'update & add' end, left(coalesce(p_label, ''), 120)));
   select username into who from profiles where id = auth.uid();
   if p_mode = 'replace' then
     delete from entries where true;
