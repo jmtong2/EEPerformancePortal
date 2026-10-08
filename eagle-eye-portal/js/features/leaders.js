@@ -1,5 +1,5 @@
 /* Team Leaders / OM & AOM / General Managers: Admin only (add, change the handled campaigns, delete).
-   The standard TL and OM & AOM lists are in js/data/defaults.js (DEFAULT_LEADERS). */
+   The standard TL, OM & AOM and GM lists are in js/data/defaults.js (DEFAULT_LEADERS). */
 
 const LEADER_TYPE_NAMES = { tl: 'TL', om: 'OM / AOM', gm: 'GM' };
 

@@ -167,8 +167,8 @@ begin
 end $$;
 
 -- ========================== ONE-TIME v9 UPGRADE ==========================
--- The standard TL and OM & AOM lists (the same as DEFAULT_LEADERS in js/data/defaults.js). After this the Admin changes
--- them in the portal (TL and OM & AOM tabs). The GM list is kept. A campaign that is named differently in the data
+-- The standard TL, OM & AOM and GM lists (the same as DEFAULT_LEADERS in js/data/defaults.js; CEPAT has no TL). After this
+-- the Admin changes them in the portal (TL, OM & AOM and GM tabs). A campaign that is named differently in the data
 -- (e.g. "CEPAT KREDIT" for CEPAT) is matched when exactly one campaign in the data starts with that name.
 -- The undo copy and the last-import copy get the same lists, so Undo and "Reset to last imported file" keep them.
 create or replace function public._v9_campaign(p text) returns text
@@ -193,12 +193,11 @@ do $$
 declare v_leaders jsonb;
 begin
   if coalesce((select schema_version from public.config where id = 1), 0) < 9 then
-    select jsonb_build_object(
+    v_leaders := jsonb_build_object(
       'tl', public._v9_leaders('[
         {"name":"RICHMOND OLIVEROS","campaigns":["ASIALINK"]},
         {"name":"JOSE ANGELO MANARPIIS","campaigns":["SURECYCLE","SOUTH ASIALINK","WISEFUND"]},
-        {"name":"JOHN LESTER MAMARIL","campaigns":["GLOBAL DOMINION","GLOBAL CEBUANA"]},
-        {"name":"JOHN CERLO CALIPES","campaigns":["CEPAT"]}
+        {"name":"JOHN LESTER MAMARIL","campaigns":["GLOBAL DOMINION","GLOBAL CEBUANA"]}
       ]'::jsonb),
       'om', public._v9_leaders('[
         {"name":"JAYME ANN PIL","campaigns":["ASIALINK"]},
@@ -208,8 +207,12 @@ begin
         {"name":"CECILE MARIE SOLANOY","campaigns":["GLOBAL DOMINION","GLOBAL CEBUANA"]},
         {"name":"ELOISA JANE BALLESTEROS","campaigns":["CEPAT"]}
       ]'::jsonb),
-      'gm', coalesce(c.leaders->'gm', '[]'::jsonb))
-    into v_leaders from public.config c where c.id = 1;
+      'gm', public._v9_leaders('[
+        {"name":"ARNEL SALLOMAN","campaigns":["ASIALINK"]},
+        {"name":"POP ANTHON PRADILLA","campaigns":["SURECYCLE","SOUTH ASIALINK","WISEFUND"]},
+        {"name":"JAY-AR FIGUEROA","campaigns":["GLOBAL DOMINION","GLOBAL CEBUANA"]},
+        {"name":"ROMMEL SARAOSOS","campaigns":["CEPAT"]}
+      ]'::jsonb));
     update public.config set leaders = v_leaders, schema_version = 9 where id = 1;
     update public.baseline set data = jsonb_set(data, '{config,leaders}', v_leaders) where data ? 'config';
     update public.snapshot_data set data = jsonb_set(data, '{config,leaders}', v_leaders) where data ? 'config';

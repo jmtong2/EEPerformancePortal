@@ -374,10 +374,10 @@ const EELocal = (() => {
         return client;
     }
 
-    /* ---------- v9: the standard TL and OM & AOM lists (js/data/defaults.js), same as the v9 block of supabase-setup.sql ----------
+    /* ---------- v9: the standard TL, OM & AOM and GM lists (js/data/defaults.js), same as the v9 block of supabase-setup.sql ----------
        A leader campaign that has a different name in the data (e.g. CEPAT vs "CEPAT KREDIT") is matched to it when exactly one
        campaign in the data starts with that name. The undo copy and the last-import copy get the same lists, so Undo and
-       "Reset to last imported file" don't bring old lists back. The GM list is kept. */
+       "Reset to last imported file" don't bring old lists back. */
     function seedLeaders(d) {
         const inData = [...new Set(d.collectors.map(c => c.campaign))];
         const match = name => {
@@ -386,7 +386,7 @@ const EELocal = (() => {
             return longer.length === 1 ? longer[0] : name;
         };
         const list = arr => arr.map(l => ({ name: l.name, campaigns: [...new Set(l.campaigns.map(match))] }));
-        const leaders = { tl: list(DEFAULT_LEADERS.tl), om: list(DEFAULT_LEADERS.om), gm: ((d.config.leaders || {}).gm) || [] };
+        const leaders = { tl: list(DEFAULT_LEADERS.tl), om: list(DEFAULT_LEADERS.om), gm: list(DEFAULT_LEADERS.gm) };
         d.config.leaders = leaders;
         [d.baseline, d.snapshot_data].forEach(b => { if (b && b.data && b.data.config) b.data.config.leaders = clone(leaders); });
     }

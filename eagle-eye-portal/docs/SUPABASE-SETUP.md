@@ -6,7 +6,7 @@ In Supabase mode the portal stores everything in **Supabase**: logins, telecolle
 
 ## Already running an earlier version on Supabase? Upgrade to v9
 1. Supabase Dashboard → **SQL Editor → New query**. Paste **all** of the new `database/supabase-setup.sql` and click **Run**. Your existing data is kept. The upgrade:
-   - **v9:** loads the standard TL and OM & AOM lists (the GM list is kept) and makes TL / OM & AOM / GM changes Admin-only;
+   - **v9:** loads the standard TL, OM & AOM and GM lists (see `README.md`) and makes changing them Admin-only;
    - **v8 (if you skipped it):** adds the columns of the Summary_Campaign_Revised layout (ENDING, # OF ACCOUNTS per provision figure, repo by age) and the "Forgot password?" requests, and resets the KPI Rate to the standard targets and weights.
 2. Replace the website files with the new `eagle-eye-portal` folder. Before you do, copy your three lines from the old `js/config.js` into the new one: `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_EMAIL_DOMAIN`.
 3. Coming from v7 or earlier: log in as Admin and import the filled **Summary_Campaign_Revised.xlsx** with **Data → Import Excel file…** (**Replace all data**).

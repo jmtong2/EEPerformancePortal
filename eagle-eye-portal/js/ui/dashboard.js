@@ -123,7 +123,7 @@ function renderDashboard() {
     $('telemetryHeaderContainer').style.display = tele ? '' : 'none';
     $('accessLevelNotice').innerText = isAdmin() ? 'Mode: Admin (Full Access)' : canEdit() ? 'Mode: Management (Edit Access)' : 'Mode: Analyst (View Only)';
     $('emptyNotice').classList.toggle('hidden', state.collectors.length > 0);
-    // Supabase database still on an older setup script (the v9 SQL adds the TL / OM & AOM lists and Admin-only leader changes).
+    // Supabase database still on an older setup script (the v9 SQL adds the TL / OM & AOM / GM lists and Admin-only leader changes).
     $('upgradeNotice').classList.toggle('hidden', !(isAdmin() && Backend && Backend.mode === 'cloud' && state.schemaVersion !== null && state.schemaVersion < 9));
 
     if (currentActiveTab.startsWith('co-')) {

@@ -24,15 +24,14 @@ const DEFAULT_HOLIDAYS = [
     { date: '2026-12-31', name: 'Last Day of the Year' }
 ];
 
-/* ===================== STANDARD TL AND OM & AOM LISTS =====================
-   Loaded once by the v9 upgrade (Local mode: js/backends/local-backend.js; Supabase: the same list in
-   database/supabase-setup.sql). After that the Admin changes them in the TL and OM & AOM tabs. The GM list is kept as it is. */
+/* ===================== STANDARD TL, OM & AOM AND GM LISTS =====================
+   Loaded once by the v9 upgrade (Local mode: js/backends/local-backend.js; Supabase: the same lists in
+   database/supabase-setup.sql). After that the Admin changes them in the TL, OM & AOM and GM tabs. CEPAT has no TL. */
 const DEFAULT_LEADERS = {
     tl: [
         { name: 'RICHMOND OLIVEROS', campaigns: ['ASIALINK'] },
         { name: 'JOSE ANGELO MANARPIIS', campaigns: ['SURECYCLE', 'SOUTH ASIALINK', 'WISEFUND'] },
-        { name: 'JOHN LESTER MAMARIL', campaigns: ['GLOBAL DOMINION', 'GLOBAL CEBUANA'] },
-        { name: 'JOHN CERLO CALIPES', campaigns: ['CEPAT'] }
+        { name: 'JOHN LESTER MAMARIL', campaigns: ['GLOBAL DOMINION', 'GLOBAL CEBUANA'] }
     ],
     om: [
         { name: 'JAYME ANN PIL', campaigns: ['ASIALINK'] },
@@ -41,6 +40,12 @@ const DEFAULT_LEADERS = {
         { name: 'MARHENIEL GADO', campaigns: ['SOUTH ASIALINK', 'WISEFUND', 'SURECYCLE'] },
         { name: 'CECILE MARIE SOLANOY', campaigns: ['GLOBAL DOMINION', 'GLOBAL CEBUANA'] },
         { name: 'ELOISA JANE BALLESTEROS', campaigns: ['CEPAT'] }
+    ],
+    gm: [
+        { name: 'ARNEL SALLOMAN', campaigns: ['ASIALINK'] },
+        { name: 'POP ANTHON PRADILLA', campaigns: ['SURECYCLE', 'SOUTH ASIALINK', 'WISEFUND'] },
+        { name: 'JAY-AR FIGUEROA', campaigns: ['GLOBAL DOMINION', 'GLOBAL CEBUANA'] },
+        { name: 'ROMMEL SARAOSOS', campaigns: ['CEPAT'] }
     ]
 };
 

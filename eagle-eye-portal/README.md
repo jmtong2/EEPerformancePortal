@@ -58,19 +58,17 @@ Before going further:
 - **Campaign Summary & Race charts** and the summary table.
 - **Entries Log** (Admin and Management).
 
-## TL and OM & AOM lists
+## TL, OM & AOM and GM lists
 v9 loads the standard lists once (in `js/data/defaults.js` and `database/supabase-setup.sql`):
 
-| TL | Handles | OM & AOM | Handles |
+| Campaigns | TL | OM & AOM | GM |
 |---|---|---|---|
-| Richmond Oliveros | Asialink | Jayme Ann Pil | Asialink |
-| Jose Angelo Manarpiis | SureCycle, South Asialink, WiseFund | Roxell Vistal | Asialink |
-| John Lester Mamaril | Global Dominion, Global Cebuana | Nichole Dela Cruz | South Asialink, WiseFund, SureCycle |
-| John Cerlo Calipes | Cepat | Marheniel Gado | South Asialink, WiseFund, SureCycle |
-| | | Cecile Marie Solanoy | Global Dominion, Global Cebuana |
-| | | Eloisa Jane Ballesteros | Cepat |
+| Asialink | Richmond Oliveros | Jayme Ann Pil, Roxell Vistal | Arnel Salloman |
+| SureCycle, South Asialink, WiseFund | Jose Angelo Manarpiis | Nichole Dela Cruz, Marheniel Gado | Pop Anthon Pradilla |
+| Global Dominion, Global Cebuana | John Lester Mamaril | Cecile Marie Solanoy | Jay-Ar Figueroa |
+| Cepat | (no TL) | Eloisa Jane Ballesteros | Rommel Saraosos |
 
-After that, only the **Admin** changes them: **Add TL / Add OM / AOM / Add GM** adds a person, and **Edit** changes which campaigns they handle or removes them. The GM list is kept as it was. A handled campaign shown in grey has no telecollectors in the data yet (for example, a different spelling in the Excel file).
+After that, only the **Admin** changes them: **Add TL / Add OM / AOM / Add GM** adds a person, and **Edit** changes which campaigns they handle or removes them. A handled campaign shown in grey has no telecollectors in the data yet (for example, a different spelling in the Excel file).
 
 ## Roles
 | | Admin | Management | Analyst |
@@ -93,7 +91,7 @@ eagle-eye-portal/
 ├── css/styles.css             Custom styles
 ├── js/config.js               ⚙ SETTINGS: storage mode, Supabase keys, starter accounts, limits
 ├── js/app.js                  Startup (picks Local or Supabase)
-├── js/data/defaults.js        KPI defaults, default holidays, standard TL / OM & AOM lists, column definitions
+├── js/data/defaults.js        KPI defaults, default holidays, standard TL / OM & AOM / GM lists, column definitions
 ├── js/core/                   Helpers, data model, validation, business days, KPI and totals
 ├── js/backends/               supabase-backend.js (online) · local-backend.js (this browser)
 ├── js/ui/                     dashboard.js · company.js (company tabs) · charts.js
