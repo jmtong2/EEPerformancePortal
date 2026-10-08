@@ -395,7 +395,8 @@ const EELocal = (() => {
     async function prepareStore() {
         let s = readStore();
         if (!s.v8) { s.db.config.kpi = null; s.db.reset_requests = s.db.reset_requests || []; s.v8 = true; writeStore(s); }   // KPI back to the standard targets and weights
-        if (!s.v9) { seedLeaders(s.db); s.v9 = true; writeStore(s); }
+        // Standard leader lists: loaded again whenever LEADERS_REVISION goes up (a browser that only has "v9" got revision 1).
+        if (Number(s.leadersRevision || (s.v9 ? 1 : 0)) < LEADERS_REVISION) { seedLeaders(s.db); s.v9 = true; s.leadersRevision = LEADERS_REVISION; writeStore(s); }
         if (s.starterSeeded) return;
         const starters = typeof LOCAL_STARTER_ACCOUNTS !== 'undefined' && Array.isArray(LOCAL_STARTER_ACCOUNTS) ? LOCAL_STARTER_ACCOUNTS : [];
         const hashed = await Promise.all(starters.map(a => hashPassword(a.password)));

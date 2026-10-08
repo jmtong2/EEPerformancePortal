@@ -26,7 +26,10 @@ const DEFAULT_HOLIDAYS = [
 
 /* ===================== STANDARD TL, OM & AOM AND GM LISTS =====================
    Loaded once by the v9 upgrade (Local mode: js/backends/local-backend.js; Supabase: the same lists in
-   database/supabase-setup.sql). After that the Admin changes them in the TL, OM & AOM and GM tabs. CEPAT has no TL. */
+   database/supabase-setup.sql). After that the Admin changes them in the TL, OM & AOM and GM tabs. CEPAT has no TL.
+   When these lists change, raise LEADERS_REVISION: each browser then loads the new lists once, replacing its saved lists
+   (for Supabase, add a matching one-time block to supabase-setup.sql). */
+const LEADERS_REVISION = 2;   // 1 = first v9 lists · 2 = CEPAT has no TL, GM list added
 const DEFAULT_LEADERS = {
     tl: [
         { name: 'RICHMOND OLIVEROS', campaigns: ['ASIALINK'] },
@@ -51,7 +54,7 @@ const DEFAULT_LEADERS = {
 
 /* ===================== COLUMN GLOSSARY (Column Guide) ===================== */
 const GLOSSARY = [
-    ['RANK', "Position by KPI Rate within the table. Ties share the same rank. — means there are no figures to score yet."],
+    ['RANK', "Position by KPI Rate within the table. Ties share the same rank and the next rank follows without a gap (1, 1, 2, 3). — means there are no figures to score yet."],
     ['CAMPAIGN', "Name of the campaign (client)."],
     ['FULL NAME', "Name of the telecollector."],
     ['# OF ACCOUNTS', "Number of accounts. In the Collection tab: accounts assigned. In the Provision tab each figure has its own count: the # OF ACCOUNTS right before ENDING, BEGINNING, TO RETAIN or FIXED PROVISION counts the accounts in that figure."],

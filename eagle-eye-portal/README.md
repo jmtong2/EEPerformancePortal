@@ -54,6 +54,7 @@ Before going further:
 - **Same Period (Collection) card**, upper right.
 - **Telecollector / TL / OM & AOM / GM rankings** by KPI Rate.
   - Standard KPI targets and weights: Collection 40% with weights 35 (Curing) / 30 (Recovery); Penalty 10% / 6%, weights 30 / 25; Provision 55% / 70%, weights 25 / 35; Repo 2%, weight 10.
+  - Ties share a rank and the next rank follows without a gap (1, 1, 2, 3), for example an OM and an AOM who handle the same campaigns.
   - Telecollectors with no figures yet show "—" instead of a rank.
 - **Campaign Summary & Race charts** and the summary table.
 - **Entries Log** (Admin and Management).

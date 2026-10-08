@@ -80,13 +80,14 @@ function getConsolidatedStats(campaigns) {
     return s;
 }
 
-// Rank by a field (descending); ties share a rank. Blank (null) values rank last.
+// Rank by a field (descending). Ties share a rank and the next rank follows without a gap (1, 1, 2, 3), e.g. an OM and
+// an AOM who handle the same campaigns. Blank (null) values rank last.
 // Rows that fail `rankable` (e.g. no figures yet) get no rank (null, shown as "—") instead of all tying at Rank 1.
 function getAssignedRanks(list, field = 'kpiRate', rankable = () => true) {
     const v = x => (x[field] === null || x[field] === undefined ? -Infinity : x[field]);
     const ranked = list.filter(rankable).sort((a, b) => v(b) - v(a)), rest = list.filter(x => !rankable(x));
     let rank = 1;
-    return ranked.map((x, i) => { if (i > 0 && Math.abs(v(x) - v(ranked[i - 1])) > 0.001) rank = i + 1; return { ...x, assignedRank: rank }; })
+    return ranked.map((x, i) => { if (i > 0 && Math.abs(v(x) - v(ranked[i - 1])) > 0.001) rank++; return { ...x, assignedRank: rank }; })
         .concat(rest.map(x => ({ ...x, assignedRank: null })));
 }
 // A KPI Rate of 0 means there are no figures to score yet (e.g. right after Start new month, or a file without numbers).
