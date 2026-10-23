@@ -14,26 +14,55 @@ const EELocal = (() => {
     const optR2 = v => (v === null || v === undefined || v === '' ? null : r2(v));
     const today = () => todayStr();
     const nowMs = () => Date.now();
+    // One time stamp per database function call, like now() in a Postgres transaction (every row a bulk change writes has
+    // exactly config.full_at). Changes here never run at the same time, so one stamp per call is enough.
+    let txNow = null;
+    const stamp = () => txNow || new Date().toISOString();
     const newId = () => (crypto.randomUUID ? crypto.randomUUID() : 'l-' + nowMs().toString(36) + '-' + Math.random().toString(36).slice(2, 12));
     const OPT = ['to_retain', 'target_repo', 'lm_collection', 'lm_sp_collection', 'lm_fixed_prov', 'lm_sp_fixed_prov', 'lm_repo', 'lm_sp_repo'];
 
     class PgError extends Error { constructor(message, code = 'P0001') { super(message); this.code = code; } }
     const raise = (m, c) => { throw new PgError(m, c); };
 
-    /* ---------- storage: one JSON document in localStorage, written all at once ---------- */
-    const emptyStore = () => ({ v: 1, users: [], db: { profiles: [], collectors: [], entries: [], snapshots: null, snapshot_data: null, baseline: null, reset_requests: [],
+    /* ---------- storage: one JSON document in localStorage ----------
+       · Kept parsed in memory; read from localStorage again only when another tab changes it (the "storage" event below).
+       · A change works on a copy, which replaces the saved data only if every check passed (all-or-nothing).
+       · Row tables are saved as { cols, rows } (field names once, then values) instead of repeating every field name in
+         every row: about 2.5 times smaller, which matters because browsers allow only about 5 MB. Older saved data still loads. */
+    const emptyStore = () => ({ v: 1, users: [], db: { profiles: [], collectors: [], entries: [], snapshots: null, snapshot_data: null, baseline: null, reset_requests: [], tombstones: [],
         config: { id: 1, campaigns: [], leaders: { tl: [], om: [], gm: [] }, kpi: null, last_import_at: 0, current_period: null, as_of: null,
-            holidays: clone(DEFAULT_HOLIDAYS), schema_version: 7 } } });
-    function readStore() {
+            holidays: clone(DEFAULT_HOLIDAYS), schema_version: 7, data_rev: 0, full_rev: 0, settings_rev: 0 } } });
+    function packRows(rows) {
+        if (!Array.isArray(rows) || !rows.length) return rows;
+        const seen = new Set();
+        for (const r of rows) for (const k in r) seen.add(k);
+        const cols = [...seen];
+        return { cols, rows: rows.map(r => cols.map(c => (r[c] === undefined ? null : r[c]))) };
+    }
+    function unpackRows(t) {
+        if (!t || !Array.isArray(t.cols) || !Array.isArray(t.rows)) return t;   // older format: already a list of rows
+        return t.rows.map(a => { const o = {}; for (let i = 0; i < t.cols.length; i++) o[t.cols[i]] = a[i]; return o; });
+    }
+    // Applies fn to every row table: the live tables and the undo / last-import copies.
+    function mapTables(s, fn) {
+        const data = x => (x && x.data ? { ...x, data: { ...x.data, collectors: fn(x.data.collectors), entries: fn(x.data.entries) } } : x);
+        return { ...s, db: { ...s.db, collectors: fn(s.db.collectors), entries: fn(s.db.entries), snapshot_data: data(s.db.snapshot_data), baseline: data(s.db.baseline) } };
+    }
+    let cache = null;
+    function readStore() {   // shared: callers must not change it (use workingCopy)
+        if (cache) return cache;
         const raw = localStorage.getItem(LOCAL_STORE_KEY);
         if (!raw) return emptyStore();
         const s = JSON.parse(raw);
         if (!s || !s.db || !Array.isArray(s.users)) throw new Error('The local data in this browser is damaged. Use Data → Undo if available, or clear this site\'s data and import the Excel file again.');
-        return s;
+        cache = mapTables(s, unpackRows);
+        return cache;
     }
+    const workingCopy = () => (typeof structuredClone === 'function' ? structuredClone(readStore()) : clone(readStore()));
     function writeStore(s) {
-        try { localStorage.setItem(LOCAL_STORE_KEY, JSON.stringify(s)); }
+        try { localStorage.setItem(LOCAL_STORE_KEY, JSON.stringify(mapTables(s, packRows))); }
         catch (e) { raise('This browser\'s storage is full (about 5 MB). Export to Excel, then import a new month\'s file with "Replace all data" (it clears the old entries log).', 'LOCAL_FULL'); }
+        cache = s;
     }
 
     /* ---------- passwords: PBKDF2-SHA256, random salt ---------- */
@@ -57,9 +86,9 @@ const EELocal = (() => {
     function checkCollector(c) {
         const bad = !['curing', 'recovery'].includes(c.team) || !/^[A-ZÑ0-9 .,'-]{1,60}$/.test(c.campaign || '') || !/^[A-ZÑ .,'-]{1,80}$/.test(c.name || '')
             || !(c.accs1 >= 0) || !(c.collectibles >= 0) || !(c.beginning >= 0) || !(c.principal_bal >= 0)
-            || ['ending', 'ending_accs', 'beginning_accs', 'to_retain_accs', 'fixed_accs', 'repo_age2', 'repo_age3', 'repo_age4'].some(f => !(c[f] >= 0))
+            || ['ending_accs', 'beginning_accs', 'to_retain_accs', 'fixed_accs', 'repo_age2', 'repo_age3', 'repo_age4'].some(f => !(c[f] >= 0))
+            || !Number.isFinite(c.ending)   // Ending may be negative
             || OPT.some(f => c[f] !== null && !(c[f] >= 0))
-            || !(c.beginning === 0 || c.to_retain === null || c.to_retain <= c.beginning + 1e-9)
             || !c.key || c.key.length > 200;
         if (bad) raise('new row for relation "collectors" violates check constraint', '23514');
     }
@@ -73,14 +102,27 @@ const EELocal = (() => {
         ending: r2(p.ending), ending_accs: Math.trunc(Number(p.ending_accs || 0)), beginning_accs: Math.trunc(Number(p.beginning_accs || 0)),
         to_retain_accs: Math.trunc(Number(p.to_retain_accs || 0)), fixed_accs: Math.trunc(Number(p.fixed_accs || 0)),
         repo_age2: r2(p.repo_age2), repo_age3: r2(p.repo_age3), repo_age4: r2(p.repo_age4),
-        updated_at: new Date().toISOString(), updated_by: p.updated_by || null });
+        updated_at: stamp(), updated_by: p.updated_by || null });
+    // Insert or update by key; a key -> position map keeps a 5,000-row import linear instead of quadratic.
     function upsert(d, rows, who) {
-        rows.forEach(x => { const row = colRow({ ...x, updated_by: who || x.updated_by }); checkCollector(row); const i = d.collectors.findIndex(y => y.key === row.key); if (i >= 0) d.collectors[i] = row; else d.collectors.push(row); });
+        const at = new Map(d.collectors.map((c, i) => [c.key, i]));
+        rows.forEach(x => {
+            const row = colRow({ ...x, updated_by: who || x.updated_by }); checkCollector(row);
+            const i = at.get(row.key);
+            if (i !== undefined) d.collectors[i] = row; else { at.set(row.key, d.collectors.length); d.collectors.push(row); }
+        });
     }
-    const currentData = d => ({ collectors: d.collectors.map(c => { const x = { ...c }; delete x.updated_at; return x; }), entries: clone(d.entries),
-        config: (() => { const c = clone(d.config); delete c.id; delete c.schema_version; return c; })() });
+    // Change counters and deleted rows, same as _bump_rev and sync_tombstones in supabase-setup.sql.
+    const tombstone = (d, tbl, rowKey) => (d.tombstones = d.tombstones || []).push({ tbl, row_key: String(rowKey), deleted_at: stamp() });
+    function bumpRev(d, full) {
+        if (full) { d.tombstones = []; d.config.full_at = stamp(); }
+        d.config.data_rev = Number(d.config.data_rev || 0) + 1;
+        if (full) d.config.full_rev = Number(d.config.full_rev || 0) + 1;
+    }
+    const currentData = d => ({ collectors: d.collectors.map(c => { const x = { ...c }; delete x.updated_at; return x; }), entries: d.entries.map(e => { const x = { ...e }; delete x.updated_at; return x; }),
+        config: (() => { const c = clone(d.config); ['id', 'schema_version', 'data_rev', 'full_rev'].forEach(k => delete c[k]); return c; })() });
     function takeSnapshot(d, uid, reason) {
-        d.snapshot_data = { id: 1, data: clone(currentData(d)) };
+        d.snapshot_data = { id: 1, data: currentData(d) };
         d.snapshots = { id: 1, reason, taken_at: nowMs(), taken_by: (me(d, uid) || {}).display_name || '', counts: { collectors: d.collectors.length, entries: d.entries.length } };
     }
     function restoreData(d, p) {
@@ -91,9 +133,10 @@ const EELocal = (() => {
         d.config.current_period = cf.current_period || null; d.config.as_of = cf.as_of || null;
         if (Array.isArray(cf.holidays)) d.config.holidays = cf.holidays;
         upsert(d, p.collectors || [], null);
+        const now = stamp();
         (p.entries || []).forEach(x => { const e = { id: x.id || newId(), key: x.key, campaign: x.campaign, team: x.team, name: x.name, date: x.date || today(),
             collection: r2(x.collection), penalty: r2(x.penalty), beginning: r2(x.beginning), to_retain: r2(x.to_retain), fixed_prov: r2(x.fixed_prov), repo: Math.trunc(Number(x.repo || 0)),
-            repo_prov: r2(x.repo_prov), by_uid: x.by_uid || null, by_name: x.by_name || null, ts: x.ts || new Date().toISOString() }; checkEntry(e); d.entries.push(e); });
+            repo_prov: r2(x.repo_prov), by_uid: x.by_uid || null, by_name: x.by_name || null, ts: x.ts || now, updated_at: now }; checkEntry(e); d.entries.push(e); });
     }
     const validPeriod = p => p === null || /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(p);
     const validDate = s => s === null || (/^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s)));
@@ -155,12 +198,14 @@ const EELocal = (() => {
             const c = d.collectors.find(x => x.key === a.p_key); if (!c) raise('Telecollector not found. Add them first via Add Tele Collector.');
             if (c.accs1 > 0 && c.repo + v.r > c.accs1) raise(`Repo cannot exceed the number of accounts (${c.accs1})`);
             Object.assign(c, { collection: r2(c.collection + v.c), penalty: r2(c.penalty + v.pe), fixed_prov: r2(c.fixed_prov + v.f), repo: c.repo + v.r,
-                repo_prov: r2(c.repo_prov + v.rp), updated_at: new Date().toISOString(), updated_by: m.username });
+                repo_prov: r2(c.repo_prov + v.rp), updated_at: stamp(), updated_by: m.username });
             checkCollector(c);
+            const now = stamp();
             const e = { id: newId(), key: c.key, campaign: c.campaign, team: c.team, name: c.name, date: a.p_date, collection: r2(v.c), penalty: r2(v.pe), beginning: 0,
-                to_retain: 0, fixed_prov: r2(v.f), repo: v.r, repo_prov: r2(v.rp), by_uid: uid, by_name: m.display_name, ts: new Date().toISOString() };
+                to_retain: 0, fixed_prov: r2(v.f), repo: v.r, repo_prov: r2(v.rp), by_uid: uid, by_name: m.display_name, ts: now, updated_at: now };
             checkEntry(e); d.entries.push(e);
             if (d.config.current_period === null || d.config.current_period === a.p_date.slice(0, 7)) d.config.as_of = d.config.as_of && d.config.as_of > a.p_date ? d.config.as_of : a.p_date;
+            bumpRev(d, false);
         } },
         delete_entry: { params: ['p_id'], run: (s, uid, a) => {
             const d = s.db; if (!isEditor(d, uid)) raise('Only Admin and Management can undo entries');
@@ -170,22 +215,29 @@ const EELocal = (() => {
             const c = d.collectors.find(x => x.key === e.key);
             if (c) {
                 Object.assign(c, { collection: r2(c.collection - e.collection), penalty: r2(c.penalty - e.penalty), beginning: r2(c.beginning - e.beginning),
-                    to_retain: c.to_retain === null ? null : r2(c.to_retain - e.to_retain), fixed_prov: r2(c.fixed_prov - e.fixed_prov), repo: c.repo - e.repo, repo_prov: r2(c.repo_prov - e.repo_prov) });
-                try { checkCollector(c); } catch { raise('Undoing this entry would make Beginning lower than To Retain. Edit To Retain first.'); }
+                    to_retain: c.to_retain === null ? null : r2(c.to_retain - e.to_retain), fixed_prov: r2(c.fixed_prov - e.fixed_prov), repo: c.repo - e.repo, repo_prov: r2(c.repo_prov - e.repo_prov),
+                    updated_at: stamp() });
+                try { checkCollector(c); } catch { raise('Undoing this entry would make a figure negative. Check the telecollector first.'); }
             }
+            tombstone(d, 'entries', e.id);
+            bumpRev(d, false);
         } },
         save_collector: { params: ['p_old_key', 'p'], run: (s, uid, a) => {
             const d = s.db; if (!isEditor(d, uid)) raise('Only Admin and Management can add or edit telecollectors');
             const p = a.p || {}, k = p.key; if (!k) raise('Missing telecollector key');
-            if ((a.p_old_key == null || a.p_old_key !== k) && d.collectors.some(x => x.key === k)) raise('DUPLICATE:' + k);
-            if (a.p_old_key != null && a.p_old_key !== k) d.collectors = d.collectors.filter(x => x.key !== a.p_old_key);
-            try { upsert(d, [p], (me(d, uid) || {}).username); } catch { raise('Invalid telecollector data (check the name, negative values, and that To Retain is not more than Beginning)'); }
-            if (a.p_old_key != null && a.p_old_key !== k) d.entries.forEach(e => { if (e.key === a.p_old_key) Object.assign(e, { key: k, name: p.name, campaign: p.campaign, team: p.team }); });
-            if (!d.config.campaigns.includes(p.campaign)) d.config.campaigns.push(p.campaign);
+            const renamed = a.p_old_key != null && a.p_old_key !== k;
+            if ((a.p_old_key == null || renamed) && d.collectors.some(x => x.key === k)) raise('DUPLICATE:' + k);
+            if (renamed) { d.collectors = d.collectors.filter(x => x.key !== a.p_old_key); tombstone(d, 'collectors', a.p_old_key); }
+            try { upsert(d, [p], (me(d, uid) || {}).username); } catch { raise('Invalid telecollector data (a name with characters that are not allowed, or a negative figure other than Ending)'); }
+            if (renamed) { const now = stamp(); d.entries.forEach(e => { if (e.key === a.p_old_key) Object.assign(e, { key: k, name: p.name, campaign: p.campaign, team: p.team, updated_at: now }); }); }
+            if (!d.config.campaigns.includes(p.campaign)) { d.config.campaigns.push(p.campaign); d.config.settings_rev = Number(d.config.settings_rev || 0) + 1; }
+            bumpRev(d, false);
         } },
         delete_collector: { params: ['p_key'], run: (s, uid, a) => {
             const d = s.db; if (!isEditor(d, uid)) raise('Only Admin and Management can delete telecollectors');
+            const before = d.collectors.length;
             d.collectors = d.collectors.filter(x => x.key !== a.p_key);
+            if (d.collectors.length !== before) { tombstone(d, 'collectors', a.p_key); bumpRev(d, false); }
         } },
         // TL / OM & AOM / GM, campaigns, KPI settings, month and holidays: Admin only (v9).
         save_config: { params: ['p'], run: (s, uid, a) => {
@@ -198,16 +250,19 @@ const EELocal = (() => {
             ['campaigns', 'leaders', 'kpi', 'holidays'].forEach(k => { if (k in p) d.config[k] = p[k]; });
             if ('current_period' in p) d.config.current_period = p.current_period || null;
             if ('as_of' in p) d.config.as_of = p.as_of || null;
+            d.config.settings_rev = Number(d.config.settings_rev || 0) + 1;
         } },
         admin_delete_all: { params: [], run: (s, uid) => {
             const d = s.db; if (!isAdmin(d, uid)) raise('Only the Admin can delete all data');
             takeSnapshot(d, uid, 'Delete all data'); d.entries = []; d.collectors = [];
+            bumpRev(d, true);
         } },
         admin_undo_last: { params: [], run: (s, uid) => {
             const d = s.db; if (!isAdmin(d, uid)) raise('Only the Admin can undo');
             if (!d.snapshots) raise('Nothing to undo');
             if (!d.snapshot_data) raise('The undo copy is missing, so it cannot be restored');
             const m = d.snapshots; restoreData(d, d.snapshot_data.data); d.snapshots = null; d.snapshot_data = null;
+            bumpRev(d, true);
             return { reason: m.reason, takenAt: m.taken_at, takenBy: m.taken_by };
         } },
         admin_import_collectors: { params: ['p_records', 'p_mode', 'p_label', 'p_meta'], run: (s, uid, a) => {
@@ -220,7 +275,7 @@ const EELocal = (() => {
             takeSnapshot(d, uid, `Excel import (${a.p_mode === 'replace' ? 'replace all' : 'update & add'}): ${String(a.p_label || '').slice(0, 120)}`);
             if (a.p_mode === 'replace') { d.entries = []; d.collectors = []; }
             try { upsert(d, a.p_records, (me(d, uid) || {}).username); }
-            catch (e) { if (e.code === '23514') raise('Some rows have invalid values (check names, negative values, and To Retain vs Beginning)'); throw e; }
+            catch (e) { if (e.code === '23514') raise('Some rows have invalid values (a name with characters that are not allowed, or a negative figure other than Ending)'); throw e; }
             const leaders = meta.leaders && typeof meta.leaders === 'object' && !Array.isArray(meta.leaders) ? meta.leaders : null;
             if (leaders) d.config.leaders = leaders;
             const fileCamps = [...new Set(a.p_records.map(x => x.campaign).filter(Boolean))];
@@ -232,13 +287,15 @@ const EELocal = (() => {
             if (meta.as_of) { if (!validDate(meta.as_of)) raise('The AS OF DATE in the file is not a valid date'); d.config.as_of = meta.as_of; }
             if (Array.isArray(meta.holidays) && meta.holidays.length) d.config.holidays = meta.holidays;
             d.config.last_import_at = nowMs();
-            d.baseline = { id: 1, data: { ...clone(currentData(d)), entries: [] }, label: String(a.p_label || '').slice(0, 120), saved_at: nowMs() };
+            d.baseline = { id: 1, data: { ...currentData(d), entries: [] }, label: String(a.p_label || '').slice(0, 120), saved_at: nowMs() };
+            bumpRev(d, true);
         } },
         admin_reset_to_baseline: { params: [], run: (s, uid) => {
             const d = s.db; if (!isAdmin(d, uid)) raise('Only the Admin can reset the data');
             if (!d.baseline) raise('No Excel file has been imported yet, so there is nothing to reset to');
             takeSnapshot(d, uid, 'Reset to last imported file');
             restoreData(d, d.baseline.data);
+            bumpRev(d, true);
             return { label: d.baseline.label, savedAt: d.baseline.saved_at };
         } },
         admin_start_new_month: { params: [], run: (s, uid) => {
@@ -246,13 +303,14 @@ const EELocal = (() => {
             takeSnapshot(d, uid, 'Start new month');
             const period = d.config.current_period || today().slice(0, 7), next = shiftMonth(period);
             d.collectors.forEach(c => Object.assign(c, { lm_collection: c.collection, lm_fixed_prov: c.fixed_prov, lm_repo: c.repo, lm_sp_collection: null, lm_sp_fixed_prov: null, lm_sp_repo: null,
-                collection: 0, penalty: 0, fixed_prov: 0, fixed_accs: 0, repo: 0, repo_prov: 0, repo_age2: 0, repo_age3: 0, repo_age4: 0, updated_at: new Date().toISOString() }));
+                collection: 0, penalty: 0, fixed_prov: 0, fixed_accs: 0, repo: 0, repo_prov: 0, repo_age2: 0, repo_age3: 0, repo_age4: 0, updated_at: stamp() }));
             Object.assign(d.config, { current_period: next, as_of: null, last_import_at: nowMs() });
+            bumpRev(d, true);
             return next;
         } }
     };
-    const TABLES_FOR_FN = { add_daily_entry: ['collectors', 'entries', 'config'], delete_entry: ['collectors', 'entries'], save_collector: ['collectors', 'entries', 'config'], delete_collector: ['collectors'],
-        save_config: ['config'], admin_delete_all: ['collectors', 'entries', 'snapshots'], admin_undo_last: ['collectors', 'entries', 'config', 'snapshots'],
+    const TABLES_FOR_FN = { add_daily_entry: ['collectors', 'entries', 'config'], delete_entry: ['collectors', 'entries', 'config'], save_collector: ['collectors', 'entries', 'config'], delete_collector: ['collectors', 'config'],
+        save_config: ['config'], admin_delete_all: ['collectors', 'entries', 'config', 'snapshots'], admin_undo_last: ['collectors', 'entries', 'config', 'snapshots'],
         admin_import_collectors: ['collectors', 'entries', 'config', 'snapshots'], admin_reset_to_baseline: ['collectors', 'entries', 'config', 'snapshots'],
         admin_start_new_month: ['collectors', 'config', 'snapshots'], claim_first_admin: ['profiles'], admin_create_profile: ['profiles'],
         admin_update_user: ['profiles'], admin_delete_user: ['profiles'], admin_set_password: ['password_reset_requests'],
@@ -261,24 +319,43 @@ const EELocal = (() => {
     /* ---------- live refresh: same tab after each change, other tabs through the browser's "storage" event ---------- */
     const channels = [];
     const notify = tables => tables.forEach(t => channels.forEach(ch => ch.handlers.filter(h => h.table === t).forEach(h => setTimeout(() => h.cb({ table: t }), 0))));
-    window.addEventListener('storage', e => { if (e.key === LOCAL_STORE_KEY) notify(['collectors', 'config', 'entries', 'snapshots', 'profiles', 'password_reset_requests']); });
+    window.addEventListener('storage', e => { if (e.key === LOCAL_STORE_KEY) { cache = null; notify(['collectors', 'config', 'entries', 'snapshots', 'profiles', 'password_reset_requests']); } });
 
-    /* ---------- reads, with the same row-level security as Supabase ---------- */
+    /* ---------- reads, with the same tables and row-level security as Supabase ----------
+       The settings are kept inside the config object here, and shown as the same typed tables as in Supabase
+       (config row, campaigns, leaders, kpi_settings, holidays), so the rest of the portal reads both the same way. */
+    const configRow = c => ({ id: 1, last_import_at: c.last_import_at, current_period: c.current_period, as_of: c.as_of, schema_version: c.schema_version,
+        kpi_cap: c.kpi && isFinite(parseFloat(c.kpi.cap)) ? Number(c.kpi.cap) : null,
+        data_rev: Number(c.data_rev || 0), full_rev: Number(c.full_rev || 0), settings_rev: Number(c.settings_rev || 0), full_at: c.full_at || null });
+    const leaderRows = c => ['tl', 'om', 'gm'].flatMap(role => ((c.leaders || {})[role] || []).map((l, i) => ({ role, name: l.name, sort_order: i + 1, campaigns: l.campaigns || [] })));
+    const kpiRows = c => {
+        const k = sanitizeKpi(c.kpi);
+        return ['curing', 'recovery'].map(bucket => Object.assign({ bucket }, ...['collection', 'penalty', 'provision', 'repo'].map(p =>
+            ({ [`${p}_target`]: k[bucket].targets[p], [`${p}_weight`]: k[bucket].weights[p] }))));
+    };
     function visibleRows(d, table, uid) {
         if (table === 'profiles') return d.profiles.filter(p => p.id === uid || isAdmin(d, uid));
         if (table === 'collectors') return isActive(d, uid) ? d.collectors : [];
-        if (table === 'config') return isActive(d, uid) ? [d.config] : [];
+        if (table === 'config') return isActive(d, uid) ? [configRow(d.config)] : [];
+        if (table === 'campaigns') return isActive(d, uid) ? (d.config.campaigns || []).map(name => ({ name })) : [];
+        if (table === 'leaders') return isActive(d, uid) ? leaderRows(d.config) : [];
+        if (table === 'kpi_settings') return isActive(d, uid) ? kpiRows(d.config) : [];
+        if (table === 'holidays') return isActive(d, uid) ? (d.config.holidays || []).map(h => ({ date: h.date, name: h.name || '' })) : [];
         if (table === 'entries') return isEditor(d, uid) ? d.entries : [];
-        if (table === 'snapshots') return isAdmin(d, uid) && d.snapshots ? [d.snapshots] : [];
+        if (table === 'snapshots') return isAdmin(d, uid) && d.snapshots ? [{ id: 1, reason: d.snapshots.reason, taken_at: d.snapshots.taken_at, taken_by: d.snapshots.taken_by,
+            collectors_count: ((d.snapshots.counts || {}).collectors) || 0, entries_count: ((d.snapshots.counts || {}).entries) || 0 }] : [];
         if (table === 'password_reset_requests') return isAdmin(d, uid) ? (d.reset_requests || []) : [];
+        if (table === 'sync_tombstones') return isActive(d, uid) ? (d.tombstones || []).filter(t => t.tbl === 'collectors' || isEditor(d, uid)) : [];
         if (table === 'snapshot_data' || table === 'baseline') return [];
         throw new PgError(`relation "public.${table}" does not exist`, '42P01');
     }
+    // Filters, sorts and pages first, then copies only the rows returned (the stored data is shared and never handed out).
     function query(client, table) {
         const q = { filters: [], order: null, from: null, to: null, lim: null, single: false };
         const api = {
             select() { return api; },
-            eq(col, v) { q.filters.push([col, v]); return api; },
+            eq(col, v) { q.filters.push(r => r[col] === v); return api; },
+            gt(col, v) { q.filters.push(r => r[col] !== null && r[col] !== undefined && r[col] > v); return api; },
             order(col, opts) { q.order = [col, !opts || opts.ascending !== false]; return api; },
             range(a, b) { q.from = a; q.to = b; return api; },
             limit(n) { q.lim = n; return api; },
@@ -286,11 +363,12 @@ const EELocal = (() => {
             then(res) {
                 try {
                     const uid = client._session && client._session.user.id;
-                    let rows = clone(visibleRows(readStore().db, table, uid));
-                    q.filters.forEach(([c, v]) => { rows = rows.filter(r => r[c] === v); });
-                    if (q.order) { const [c, asc] = q.order; rows.sort((x, y) => (x[c] > y[c] ? 1 : x[c] < y[c] ? -1 : 0) * (asc ? 1 : -1)); }
+                    let rows = visibleRows(readStore().db, table, uid);
+                    q.filters.forEach(f => { rows = rows.filter(f); });
+                    if (q.order) { const [c, asc] = q.order; rows = rows.slice().sort((x, y) => (x[c] > y[c] ? 1 : x[c] < y[c] ? -1 : 0) * (asc ? 1 : -1)); }
                     if (q.from !== null) rows = rows.slice(q.from, Math.min(q.to + 1, q.from + 1000)); else rows = rows.slice(0, 1000);
                     if (q.lim !== null) rows = rows.slice(0, q.lim);
+                    rows = clone(rows);
                     if (q.single) return res(rows.length > 1 ? { data: null, error: { message: 'multiple rows', code: 'PGRST116' } } : { data: rows[0] || null, error: null });
                     res({ data: rows, error: null });
                 } catch (e) { res({ data: null, error: { message: e.message, code: e.code } }); }
@@ -317,7 +395,7 @@ const EELocal = (() => {
                 if (String(password || '').length < 6) return fail('Password should be at least 6 characters');
                 const hashed = await hashPassword(password);
                 try {
-                    const s = readStore();
+                    const s = workingCopy();
                     if (s.users.some(u => u.email === email)) return fail('User already registered');
                     const u = { id: newId(), email, ...hashed };
                     s.users.push(u); writeStore(s);
@@ -341,7 +419,7 @@ const EELocal = (() => {
                 if (String(password || '').length < 6) return { data: null, error: { message: 'Password should be at least 6 characters' } };
                 const hashed = await hashPassword(password);
                 try {
-                    const s = readStore(), u = s.users.find(x => x.id === client._session.user.id);
+                    const s = workingCopy(), u = s.users.find(x => x.id === client._session.user.id);
                     if (!u) return { data: null, error: { message: 'Not signed in' } };
                     Object.assign(u, hashed); writeStore(s);
                     return { data: { user: { id: u.id } }, error: null };
@@ -358,8 +436,10 @@ const EELocal = (() => {
             if (!uid && !def.anon) return { data: null, error: { message: 'Not signed in', code: 'P0001' } };
             try {
                 const a = def.prepare ? await def.prepare(clone(args || {})) : clone(args || {});
-                const work = readStore();                 // fresh copy (another tab may have changed it)
-                const out = def.run(work, uid, a);
+                const work = def.readOnly ? readStore() : workingCopy();   // changes work on a copy: saved only if every check passes
+                txNow = new Date().toISOString();
+                let out;
+                try { out = def.run(work, uid, a); } finally { txNow = null; }
                 if (!def.readOnly) { writeStore(work); notify(TABLES_FOR_FN[fn] || []); }   // all-or-nothing: saved only if every check passed
                 return { data: out === undefined ? null : out, error: null };
             } catch (e) { return { data: null, error: { message: e.message, code: e.code || 'P0001' } }; }
@@ -393,14 +473,14 @@ const EELocal = (() => {
 
     /* ---------- once per browser: v8 and v9 updates + the starter accounts (js/config.js LOCAL_STARTER_ACCOUNTS) ---------- */
     async function prepareStore() {
-        let s = readStore();
+        let s = workingCopy();
         if (!s.v8) { s.db.config.kpi = null; s.db.reset_requests = s.db.reset_requests || []; s.v8 = true; writeStore(s); }   // KPI back to the standard targets and weights
         // Standard leader lists: loaded again whenever LEADERS_REVISION goes up (a browser that only has "v9" got revision 1).
         if (Number(s.leadersRevision || (s.v9 ? 1 : 0)) < LEADERS_REVISION) { seedLeaders(s.db); s.v9 = true; s.leadersRevision = LEADERS_REVISION; writeStore(s); }
         if (s.starterSeeded) return;
         const starters = typeof LOCAL_STARTER_ACCOUNTS !== 'undefined' && Array.isArray(LOCAL_STARTER_ACCOUNTS) ? LOCAL_STARTER_ACCOUNTS : [];
         const hashed = await Promise.all(starters.map(a => hashPassword(a.password)));
-        s = readStore();
+        s = workingCopy();
         starters.forEach((a, i) => {
             const username = String(a.username || '').trim().toLowerCase();
             if (!/^[a-z0-9._-]{3,30}$/.test(username) || !['Admin', 'Management', 'Analyst'].includes(a.role)) return;
@@ -417,7 +497,7 @@ const EELocal = (() => {
     //   eeLocalSetPassword('admin', 'NewPassword')
     async function setPassword(username, password) {
         if (String(password || '').length < minPasswordLength()) throw new Error(`Use at least ${minPasswordLength()} characters.`);
-        const hashed = await hashPassword(password), s = readStore(), email = sbEmail(username);
+        const hashed = await hashPassword(password), s = workingCopy(), email = sbEmail(username);
         const u = s.users.find(x => x.email === email);
         if (!u) throw new Error('No local login with that username.');
         Object.assign(u, hashed); writeStore(s);

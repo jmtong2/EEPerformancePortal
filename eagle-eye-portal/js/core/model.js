@@ -7,7 +7,7 @@ let Backend = null; // SupabaseBackend (set in app.js)
 
 function emptyState() {
     return { campaigns: [], collectors: [], leaders: { tl: [], om: [], gm: [] }, entries: [], kpi: null, lastImportAt: 0, snapshot: null,
-        currentPeriod: null, asOf: null, holidays: [], resetRequests: [], schemaVersion: null };
+        currentPeriod: null, asOf: null, holidays: [], resetRequests: [], schemaVersion: null, dataRev: null, fullRev: null, settingsRev: null, kpiCap: null };
 }
 
 /* ---------- roles ---------- */
@@ -110,9 +110,31 @@ function sanitizeEntry(e) {
     };
 }
 
-function allCampaigns() { return uniq([...state.campaigns, ...state.collectors.map(c => c.campaign)]); }
+/* ---------- lookups, built once per telecollector list ----------
+   state.collectors is always replaced, never changed in place, so the list's identity tells whether these are current.
+   byKey: key -> telecollector · byCampaign / byGroup ("CAMPAIGN|team"): lists in list order, first-seen campaign order
+   · colorIndex: campaign -> position in the alphabetical list (fixed chart colours). */
+let _index = { list: null };
+function dataIndex() {
+    if (_index.list === state.collectors) return _index;
+    const byKey = new Map(), byCampaign = groupBy(state.collectors, c => c.campaign), byGroup = groupBy(state.collectors, c => `${c.campaign}|${c.team}`);
+    for (const c of state.collectors) byKey.set(c.key, c);
+    const sorted = [...byCampaign.keys()].filter(Boolean).sort();
+    _index = { list: state.collectors, byKey, byCampaign, byGroup, colorIndex: new Map(sorted.map((c, i) => [c, i])) };
+    return _index;
+}
+// Campaigns from the settings, then the ones in the data. The same (frozen) array until either changes.
+let _campaigns = { list: null, extra: null, out: [] };
+function allCampaigns() {
+    if (_campaigns.list !== state.collectors || _campaigns.extra !== state.campaigns)
+        _campaigns = { list: state.collectors, extra: state.campaigns, out: Object.freeze(uniq([...state.campaigns, ...dataIndex().byCampaign.keys()])) };
+    return _campaigns.out;
+}
 function leaderCampaigns(leaders = state.leaders) { return uniq(['tl', 'om', 'gm'].flatMap(t => (leaders[t] || []).flatMap(l => l.campaigns || []))); }
-function findCollector(key) { return state.collectors.find(c => c.key === key); }
+function findCollector(key) { return dataIndex().byKey.get(key); }
+// slug(name) per telecollector, worked out once (used by the similar-name checks).
+const _slugs = new WeakMap();
+function nameSlug(c) { let s = _slugs.get(c); if (s === undefined) { s = slug(c.name); _slugs.set(c, s); } return s; }
 function dupError(c) {
     const ex = findCollector(c.key) || c;
     const e = new Error(`${ex.name} already exists in ${ex.campaign} (${ex.team}). Use "Daily Log-in Entry" to add production to the existing record.`);

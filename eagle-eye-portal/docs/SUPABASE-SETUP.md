@@ -6,12 +6,15 @@ In Supabase mode the portal stores everything in **Supabase**: logins, telecolle
 
 ## Already running an earlier version on Supabase? Upgrade to v9
 1. Supabase Dashboard → **SQL Editor → New query**. Paste **all** of the new `database/supabase-setup.sql` and click **Run**. Your existing data is kept. The upgrade:
+   - **latest:** allows To Retain to be more than Beginning (each figure has its own # of accounts) and a negative Ending. The Excel import lists those rows and the Admin ticks that they were verified before importing;
    - **v9:** loads the standard TL, OM & AOM and GM lists (see `README.md`) and makes changing them Admin-only;
+   - **v9:** stores everything in typed columns (see "How the data is stored" below). The settings and the undo / last-import copies that older versions kept as JSON are moved into the new tables automatically;
+   - **v9:** faster with large data: each PC downloads only what changed, and the security checks run once per query instead of once per row;
    - **v8 (if you skipped it):** adds the columns of the Summary_Campaign_Revised layout (ENDING, # OF ACCOUNTS per provision figure, repo by age) and the "Forgot password?" requests, and resets the KPI Rate to the standard targets and weights.
 2. Replace the website files with the new `eagle-eye-portal` folder. Before you do, copy your three lines from the old `js/config.js` into the new one: `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_EMAIL_DOMAIN`.
 3. Coming from v7 or earlier: log in as Admin and import the filled **Summary_Campaign_Revised.xlsx** with **Data → Import Excel file…** (**Replace all data**).
 
-If you skip step 1, the Admin sees a red "Finish the v9 upgrade" notice (or, from v7 and earlier, *"The Supabase database is not set up for this version yet"*).
+If you skip step 1, the Admin sees a red "Update the database" notice (or, from v7 and earlier, *"The Supabase database is not set up for this version yet"*).
 
 ---
 ## New project: step by step (about 20 minutes, free plan)
@@ -100,6 +103,21 @@ In the old portal, go to **Data → Export to Excel**, then import that file her
 
 > Tip: keep **two Admin accounts** so one can always reset the other.
 
+## How the data is stored
+Every value has its own column with a proper data type: amounts `numeric`, counts `integer`, dates `date`, times `timestamptz`, campaign lists `text[]`. Nothing is stored as JSON. (JSON is only the envelope a batch travels in, for example an Excel import sent to the database in one call.)
+
+| Table | What it holds |
+|---|---|
+| `collectors` | One row per telecollector per bucket: the month-to-date figures |
+| `entries` | The daily entries log |
+| `config` | One row: month, "as of" date, KPI score cap, change counters |
+| `campaigns`, `leaders`, `kpi_settings`, `holidays` | Settings: campaign list, TL / OM & AOM / GM with the campaigns they handle, KPI targets and weights per bucket, holidays |
+| `snapshots`, `baseline` | What the undo copy and the last-import copy are (reason, who, when, counts) |
+| `backup.*` (separate schema) | The undo copy and the last-import copy themselves: the same tables plus a `kind` column (`undo` / `baseline`) |
+| `profiles`, `password_reset_requests`, `sync_tombstones` | Logins' roles, "Forgot password?" requests, recently deleted rows for syncing |
+
+You can browse all of them in Supabase → **Table Editor** (choose the `backup` schema at the top to see the copies).
+
 ## Free-plan notes
 - Supabase pauses free projects after 7 days without activity. To wake it, open the dashboard and click **Restore project**; no data is lost.
 - The free database holds 500 MB. This portal uses well under 50 MB.
@@ -118,12 +136,12 @@ In the old portal, go to **Data → Export to Excel**, then import that file her
 | Stuck on "Connecting to cloud…" | Check the internet connection, the URL and the key, and whether the project is **paused**. |
 
 ## Security notes
+- The connection is encrypted (HTTPS). The **anon / publishable** key in `js/config.js` is meant to be public: every browser that opens the portal needs it. What protects the data is below. The **service_role / secret** key is never used by the portal.
 - Tables are **read-only** through the API. Every change goes through a database function that checks the user's role on the server, and each function runs as one all-or-nothing transaction.
 - Analysts can't read the entries log.
-- The undo copy and the last-import copy are never sent to any browser.
+- The undo copy and the last-import copy live in the `backup` schema, which the API does not publish and browsers have no rights on. They are never sent to any browser.
 - The server also checks the data:
-  - no negative amounts;
-  - To Retain can't be more than Beginning;
+  - no negative amounts (except Ending);
   - names may contain letters only;
   - Repo can't exceed # accounts;
   - valid months and dates;

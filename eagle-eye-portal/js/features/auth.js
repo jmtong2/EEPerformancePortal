@@ -87,7 +87,7 @@ function onAuthChanged(user) {
     if (!user) {
         ['changePassModal', 'usersModal', 'editLeaderModal', 'entryModal', 'teleModal', 'kpiModal', 'guideModal', 'importModal', 'periodModal', 'pwConfirmModal'].forEach(hideModal);
         starterLogin = false;
-        clearTimeout(inactivityTimer);
+        clearTimeout(inactivityTimer); inactivityTimer = null;
         applyRoleVisibility();
         showAuthModal();
         return;
@@ -103,12 +103,19 @@ function onAuthChanged(user) {
     renderDashboard();
 }
 
-/* ---------- inactivity logout ---------- */
-let inactivityTimer;
+/* ---------- inactivity logout ----------
+   Mouse moves and key presses only note the time (they fire constantly); one timer checks it when it runs out. */
+let inactivityTimer = null, lastActivity = Date.now();
 function resetInactivityTimer() {
-    clearTimeout(inactivityTimer);
+    lastActivity = Date.now();
+    if (currentUser && !inactivityTimer) inactivityTimer = setTimeout(checkInactivity, INACTIVITY_LIMIT);
+}
+function checkInactivity() {
+    inactivityTimer = null;
     if (!currentUser) return;
-    inactivityTimer = setTimeout(() => { toast('Logged out after 10 minutes of inactivity.', 'info'); Backend.logout(); }, INACTIVITY_LIMIT);
+    const idle = Date.now() - lastActivity;
+    if (idle >= INACTIVITY_LIMIT) { toast('Logged out after 10 minutes of inactivity.', 'info'); Backend.logout(); }
+    else inactivityTimer = setTimeout(checkInactivity, INACTIVITY_LIMIT - idle);
 }
 ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev => window.addEventListener(ev, resetInactivityTimer, true));
 

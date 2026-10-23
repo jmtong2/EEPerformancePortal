@@ -3,15 +3,16 @@
 const NAME_RE = /^[A-ZÑ0-9 .,'\-]+$/;   // campaigns
 const PERSON_RE = /^[A-ZÑ .,'\-]+$/;    // people: no digits
 
-function readMoney(id, label, errors) {
+// signed: the figure may be below 0 (Ending); the form shows that as a warning instead.
+function readMoney(id, label, errors, signed = false) {
     const el = $(id), raw = el.value.trim();
     if (el.validity.badInput) { errors.push(`${label}: not a valid number.`); return 0; }
     if (raw === '') return 0;
     const n = Number(raw);
     if (!isFinite(n)) { errors.push(`${label}: not a valid number.`); return 0; }
-    if (n < 0) errors.push(`${label} cannot be negative.`);
-    else if (!/^\d+(\.\d{1,2})?$/.test(raw)) errors.push(`${label}: use at most 2 decimal places.`);
-    else if (n > 9999999999) errors.push(`${label} is unrealistically large.`);
+    if (n < 0 && !signed) errors.push(`${label} cannot be negative.`);
+    else if (!/^-?\d+(\.\d{1,2})?$/.test(raw)) errors.push(`${label}: use at most 2 decimal places.`);
+    else if (Math.abs(n) > 9999999999) errors.push(`${label} is unrealistically large.`);
     return n;
 }
 

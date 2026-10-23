@@ -1,7 +1,18 @@
 /* SUPABASE backend: Supabase Auth + Postgres + Realtime (the portal's only storage).
    Requires database/supabase-setup.sql to have been run (docs/SUPABASE-SETUP.md).
    Tables are read-only through the API; every change is a database function (RPC) that checks the
-   caller's role and runs as one transaction. */
+   caller's role and runs as one transaction.
+
+   Keeping every PC up to date without re-downloading everything:
+   · Each change function bumps config.data_rev (bulk ones such as an import, undo or new month also bump full_rev).
+     Realtime only watches the one config row, so one small message per change reaches each PC, not one per row.
+   · On that message the PC reads the config row, then downloads only what changed: telecollectors and entries with
+     a newer updated_at, plus sync_tombstones (deleted rows). A full_rev change means a full reload instead.
+   · Change times come from the database clock. The last SYNC_OVERLAP_MS are read again each time, because a slower
+     transaction can commit after a later one; rows already up to date are skipped.
+   · A database still on an older setup script (no data_rev column) gets full reloads, as before. */
+const SYNC_OVERLAP_MS = 2 * 60 * 1000;
+const SYNC_PAGE = 200;   // more changed rows than this since the last sync -> a full reload is simpler
 
 // Usernames become placeholder login e-mails (username@domain); no e-mails are ever sent.
 // The domain is cleaned up so common config mistakes ("@company.com", a full e-mail address, "https://…", spaces) still work.
@@ -27,11 +38,26 @@ const SB_COLLECTOR_FIELDS = [ // [app field, database column]
     ['ending', 'ending'], ['endingAccs', 'ending_accs'], ['beginningAccs', 'beginning_accs'], ['toRetainAccs', 'to_retain_accs'], ['fixedAccs', 'fixed_accs'],
     ['repoAge2', 'repo_age2'], ['repoAge3', 'repo_age3'], ['repoAge4', 'repo_age4']
 ];
+const SB_COLLECTOR_COLUMNS = SB_COLLECTOR_FIELDS.map(([, d]) => d).concat('updated_at').join(',');
+const SB_ENTRY_COLUMNS = 'id,key,campaign,team,name,date,collection,penalty,beginning,to_retain,fixed_prov,repo,repo_prov,by_uid,by_name,ts,updated_at';
 const sbToDbCollector = c => Object.fromEntries(SB_COLLECTOR_FIELDS.map(([a, d]) => [d, c[a] === undefined ? null : c[a]]));
-const sbFromDbCollector = r => ({ ...makeCollector(Object.fromEntries(SB_COLLECTOR_FIELDS.map(([a, d]) => [a, r[d]]))), key: r.key });
-const sbFromDbEntry = r => sanitizeEntry({ id: r.id, key: r.key, campaign: r.campaign, team: r.team, name: r.name, date: r.date, collection: r.collection,
+// _ts = when the row last changed (database clock, ms): decides which copy is newer while syncing.
+const sbFromDbCollector = r => ({ ...makeCollector(Object.fromEntries(SB_COLLECTOR_FIELDS.map(([a, d]) => [a, r[d]]))), key: r.key, _ts: Date.parse(r.updated_at) || 0 });
+const sbFromDbEntry = r => ({ ...sanitizeEntry({ id: r.id, key: r.key, campaign: r.campaign, team: r.team, name: r.name, date: r.date, collection: r.collection,
     penalty: r.penalty, beginning: r.beginning, toRetain: r.to_retain, fixedProv: r.fixed_prov, repo: r.repo, repoProv: r.repo_prov,
-    by: r.by_uid, byName: r.by_name, ts: Date.parse(r.ts) });
+    by: r.by_uid, byName: r.by_name, ts: Date.parse(r.ts) }), _ts: Date.parse(r.updated_at || r.ts) || 0 });
+// kpi_settings rows (one per bucket, a column per target and weight) -> { cap, curing: { weights, targets }, recovery: {...} }
+function sbKpiFromRows(rows, cap) {
+    const k = { cap };
+    (rows || []).forEach(r => {
+        k[r.bucket] = { weights: {}, targets: {} };
+        ['collection', 'penalty', 'provision', 'repo'].forEach(p => { k[r.bucket].targets[p] = r[`${p}_target`]; k[r.bucket].weights[p] = r[`${p}_weight`]; });
+    });
+    return k;
+}
+const sameCollector = (a, b) => SB_COLLECTOR_FIELDS.every(([f]) => a[f] === b[f]);
+const byKeyOrder = (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+const newestTs = (list, from) => list.reduce((m, x) => (x._ts > m ? x._ts : m), from);
 const sbFromDbProfile = (r, uid) => r ? { uid: r.id || uid, username: r.username, displayName: r.display_name, role: r.role, active: r.active } : null;
 function sbError(e) { return Object.assign(new Error((e && e.message) || String(e)), { code: (e && (e.code || e.status)) || '' }); }
 // Fixes common copy-paste mistakes in SUPABASE_URL: the dashboard link, a trailing "/", or an API path like "/rest/v1/".
@@ -56,6 +82,11 @@ const SupabaseBackend = {
     channel: null,
     timers: {},
     settingUp: false,
+    cursor: null,   // newest change already loaded (ms, database clock): { collectors, entries, tombs }
+    synced: null,   // change counters the loaded data reflects: { data, full, settings }
+    gen: 0,         // goes up on every login / logout / role change; answers to requests from before are dropped
+    _sync: null,
+    _syncAgain: false,
 
     async init(onData, onAuth) {
         this.onData = onData; this.onAuth = onAuth;
@@ -120,45 +151,188 @@ const SupabaseBackend = {
         }
         return out;
     },
+    // Keyset paging (WHERE key > last ORDER BY key): every page is an index lookup, however large the table.
+    // Stops on an empty page, so it also works if the project returns fewer rows per request than asked for.
+    async selectByKey(table, columns, keyCol) {
+        const out = [];
+        for (let last = null; ;) {
+            let q = this.sb.from(table).select(columns).order(keyCol, { ascending: true }).limit(1000);
+            if (last !== null) q = q.gt(keyCol, last);
+            const { data, error } = await q;
+            if (error) throw sbError(error);
+            if (!data.length) return out;
+            for (const r of data) out.push(r);
+            last = data[data.length - 1][keyCol];
+        }
+    },
     async fetchOwnProfile() {
         const { data, error } = await this.sb.from('profiles').select('*').eq('id', this.uid).maybeSingle();
         if (error) throw sbError(error);
         return sbFromDbProfile(data, this.uid);
     },
-    async fetchCollectors() { state.collectors = (await this.selectAll('collectors', 'key')).map(sbFromDbCollector); },
+    async fetchCollectors() {
+        const gen = this.gen;
+        const list = (await this.selectByKey('collectors', SB_COLLECTOR_COLUMNS, 'key')).map(sbFromDbCollector).sort(byKeyOrder);
+        if (gen !== this.gen) return;
+        state.collectors = list;
+        this.cursor.collectors = this.cursor.tombs = newestTs(list, 0);
+    },
+    // The one config row: month, "as of" date, KPI score cap and the change counters.
     async fetchConfig() {
+        const gen = this.gen;
         const { data, error } = await this.sb.from('config').select('*').eq('id', 1).maybeSingle();
         if (error) throw sbError(error);
-        const d = data || {};
-        state.campaigns = Array.isArray(d.campaigns) ? d.campaigns : [];
-        state.leaders = sanitizeLeaders(d.leaders);
-        state.kpi = sanitizeKpi(d.kpi);
+        if (gen !== this.gen) return;
+        const d = data || {}, opt = v => (v === undefined || v === null ? null : v);
         state.lastImportAt = num(d.last_import_at);
         state.currentPeriod = d.current_period || null;
         state.asOf = d.as_of || null;
-        state.holidays = sanitizeHolidays(d.holidays);
-        state.schemaVersion = d.schema_version === undefined || d.schema_version === null ? null : num(d.schema_version);
+        state.schemaVersion = opt(d.schema_version) === null ? null : num(d.schema_version);
+        state.kpiCap = opt(d.kpi_cap) === null ? null : num(d.kpi_cap);
+        // Change counters (v9 setup script); null = older database, which gets full reloads.
+        state.dataRev = opt(d.data_rev) === null ? null : String(d.data_rev);
+        state.fullRev = opt(d.full_rev) === null ? null : String(d.full_rev);
+        state.fullAt = opt(d.full_at);   // exact time stamp of the rows the last bulk change wrote (kept as text: microseconds)
+        // A database still on an older setup script keeps the settings as JSON in this row; v9 has a table for each.
+        if (d.leaders !== undefined) {
+            state.settingsRev = null;
+            state.campaigns = Array.isArray(d.campaigns) ? d.campaigns : [];
+            state.leaders = sanitizeLeaders(d.leaders);
+            state.kpi = sanitizeKpi(d.kpi);
+            state.holidays = sanitizeHolidays(d.holidays);
+        } else state.settingsRev = String(opt(d.settings_rev) === null ? 0 : d.settings_rev);
+    },
+    // Settings tables (v9): campaigns, leaders, kpi_settings, holidays. Read again only when settings_rev or full_rev changes.
+    async fetchSettings() {
+        if (state.settingsRev === null) return;   // older database: already read with the config row
+        const gen = this.gen;
+        const res = await Promise.all([
+            this.sb.from('campaigns').select('name').order('name', { ascending: true }),
+            this.sb.from('leaders').select('role,name,sort_order,campaigns').order('sort_order', { ascending: true }),
+            this.sb.from('kpi_settings').select('*'),
+            this.sb.from('holidays').select('date,name').order('date', { ascending: true })
+        ]);
+        const failed = res.find(r => r.error);
+        if (failed) throw sbError(failed.error);
+        if (gen !== this.gen) return;
+        const [campaigns, leaders, kpi, holidays] = res.map(r => r.data);
+        state.campaigns = campaigns.map(r => r.name);
+        state.leaders = sanitizeLeaders(Object.fromEntries(['tl', 'om', 'gm'].map(t => [t, leaders.filter(l => l.role === t)])));
+        state.kpi = sanitizeKpi(sbKpiFromRows(kpi, state.kpiCap));
+        state.holidays = sanitizeHolidays(holidays);
     },
     async fetchEntries() {
+        const gen = this.gen;
         if (!this.isEditorProfile()) { state.entries = []; return; }
         const { data, error } = await this.sb.from('entries').select('*').order('ts', { ascending: false }).limit(CLOUD_ENTRY_LIMIT);
         if (error) throw sbError(error);
+        if (gen !== this.gen) return;
         state.entries = data.map(sbFromDbEntry);
+        this.cursor.entries = newestTs(state.entries, 0);
     },
     async fetchSnapshot() {
+        const gen = this.gen;
         if (!this.isAdminProfile()) { state.snapshot = null; return; }
         const { data, error } = await this.sb.from('snapshots').select('*').eq('id', 1).maybeSingle();
         if (error) throw sbError(error);
-        state.snapshot = data ? { reason: data.reason, takenAt: num(data.taken_at), takenBy: data.taken_by, counts: data.counts } : null;
+        if (gen !== this.gen) return;
+        state.snapshot = data ? { reason: data.reason, takenAt: num(data.taken_at), takenBy: data.taken_by,
+            counts: data.counts || { collectors: num(data.collectors_count), entries: num(data.entries_count) } } : null;
     },
     async fetchResetRequests() {
+        const gen = this.gen;
         if (!this.isAdminProfile()) { state.resetRequests = []; return; }
         const { data, error } = await this.sb.from('password_reset_requests').select('*').order('requested_at', { ascending: false }).limit(100);
+        if (gen !== this.gen) return;
         if (error) { state.resetRequests = []; return; }   // table missing until the v8 SQL is run: not fatal
         state.resetRequests = data.map(r => ({ id: r.id, username: r.username, at: Date.parse(r.requested_at) }));
     },
-    async fetchAll() { await Promise.all([this.fetchCollectors(), this.fetchConfig(), this.fetchEntries(), this.fetchSnapshot(), this.fetchResetRequests()]); },
+    // The config row (with the change counters) is read first: a change made while the rest loads has a newer counter,
+    // so the next sync still picks it up.
+    async fetchAll() {
+        await this.fetchConfig();
+        this.synced = { data: state.dataRev, full: state.fullRev, settings: state.settingsRev };
+        await Promise.all([this.fetchSettings(), this.fetchCollectors(), this.fetchEntries(), this.fetchSnapshot(), this.fetchResetRequests()]);
+    },
     async refresh(...names) { await Promise.all(names.map(n => this['fetch' + n]())); this.onData(); },
+
+    /* ---------- keeping up to date (see the top of this file) ---------- */
+    // One sync at a time. A request during a sync runs one more sync afterwards, so a caller always sees its own change.
+    syncNow() {
+        if (this._sync) { this._syncAgain = true; return this._sync; }
+        const gen = this.gen;
+        let p;
+        p = (async () => {
+            try { do { this._syncAgain = false; await this.syncOnce(gen); } while (this._syncAgain && gen === this.gen); }
+            finally { if (this._sync === p) this._sync = null; }
+        })();
+        this._sync = p;
+        return p;
+    },
+    // this.synced = the change counters the loaded data reflects (fetchConfig alone, e.g. after saving settings, leaves it as is).
+    async syncOnce(gen) {
+        await this.fetchConfig();
+        if (gen !== this.gen) return;
+        const now = { data: state.dataRev, full: state.fullRev, settings: state.settingsRev };
+        const full = now.full === null || now.full !== this.synced.full, jobs = [];
+        if (full || now.settings !== this.synced.settings) jobs.push(this.fetchSettings());
+        if (full) jobs.push(this.fetchCollectors(), this.fetchEntries(), this.fetchSnapshot());
+        else if (now.data !== this.synced.data) jobs.push(this.syncChanges(gen));
+        await Promise.all(jobs);
+        if (gen !== this.gen) return;
+        this.synced = now;
+        this.onData();
+    },
+    // Downloads only the rows changed since the last sync (plus the overlap), and the rows deleted since then.
+    // Rows written by the last bulk change all carry exactly full_at and are already loaded, so the window never starts
+    // before it (otherwise the first change after an import would download every imported row again).
+    async syncChanges(gen) {
+        const fullAt = state.fullAt, fullAtMs = fullAt ? Date.parse(fullAt) : NaN;
+        const since = ms => (fullAtMs >= ms - SYNC_OVERLAP_MS ? fullAt : new Date(Math.max(0, ms - SYNC_OVERLAP_MS)).toISOString());
+        const changed = (table, columns, col, from) => this.sb.from(table).select(columns).gt(col, since(from)).order(col, { ascending: true }).limit(SYNC_PAGE);
+        const editor = this.isEditorProfile();
+        const res = await Promise.all([
+            changed('collectors', SB_COLLECTOR_COLUMNS, 'updated_at', this.cursor.collectors),
+            changed('sync_tombstones', 'tbl,row_key,deleted_at', 'deleted_at', this.cursor.tombs),
+            editor ? changed('entries', SB_ENTRY_COLUMNS, 'updated_at', this.cursor.entries) : { data: [], error: null }
+        ]);
+        const failed = res.find(r => r.error);
+        if (failed) throw sbError(failed.error);
+        if (gen !== this.gen) return;
+        if (res.some(r => r.data.length >= SYNC_PAGE)) return Promise.all([this.fetchCollectors(), this.fetchEntries()]);   // a lot changed: reload
+        const [c, t, e] = res.map(r => r.data);
+        const deleted = t.map(x => ({ tbl: x.tbl, id: x.row_key, at: Date.parse(x.deleted_at) || 0 }));
+        this.applyCollectors(c.map(sbFromDbCollector), deleted.filter(d => d.tbl === 'collectors'));
+        if (editor) this.applyEntries(e.map(sbFromDbEntry), deleted.filter(d => d.tbl === 'entries'));
+        this.cursor.tombs = deleted.reduce((m, d) => Math.max(m, d.at), this.cursor.tombs);
+    },
+    // A newer row replaces the loaded one (same time: only if it differs). A deletion removes the row unless the row
+    // changed after it (deleted, then added again). The list is replaced, never changed in place.
+    applyCollectors(rows, deleted) {
+        this.cursor.collectors = newestTs(rows, this.cursor.collectors);
+        if (!rows.length && !deleted.length) return;
+        const map = new Map(dataIndex().byKey);
+        let changed = false;
+        for (const c of rows) {
+            const cur = map.get(c.key);
+            if (!cur || c._ts > cur._ts || (c._ts === cur._ts && !sameCollector(c, cur))) { map.set(c.key, c); changed = true; }
+        }
+        for (const d of deleted) { const cur = map.get(d.id); if (cur && cur._ts <= d.at) { map.delete(d.id); changed = true; } }
+        if (changed) state.collectors = [...map.values()].sort(byKeyOrder);
+    },
+    applyEntries(rows, deleted) {
+        this.cursor.entries = newestTs(rows, this.cursor.entries);
+        if (!rows.length && !deleted.length) return;
+        const map = new Map(state.entries.map(e => [e.id, e]));
+        const same = (a, b) => a.key === b.key && a.name === b.name && a.campaign === b.campaign && a.team === b.team;
+        let changed = false;
+        for (const e of rows) {
+            const cur = map.get(e.id);
+            if (!cur || e._ts > cur._ts || (e._ts === cur._ts && !same(e, cur))) { map.set(e.id, e); changed = true; }
+        }
+        for (const d of deleted) { const cur = map.get(d.id); if (cur && cur._ts <= d.at) { map.delete(d.id); changed = true; } }
+        if (changed) state.entries = [...map.values()].sort((a, b) => b.ts - a.ts).slice(0, CLOUD_ENTRY_LIMIT);
+    },
 
     /* ---------- realtime ---------- */
     subscribe() {
@@ -166,17 +340,29 @@ const SupabaseBackend = {
             clearTimeout(this.timers[name]);
             this.timers[name] = setTimeout(() => this.refresh(name).catch(e => toast('Cloud sync error: ' + friendlyError(e), 'err')), 300);
         };
+        const sync = () => {
+            clearTimeout(this.timers.sync);
+            this.timers.sync = setTimeout(() => this.syncNow().catch(e => toast('Cloud sync error: ' + friendlyError(e), 'err')), 300);
+        };
+        // Older databases still send every telecollector / entry change; newer ones only the config change.
+        const oldDatabase = () => { if (state.fullRev === null) sync(); };
         let ch = this.sb.channel('eeportal-' + this.uid)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'collectors' }, () => later('Collectors'))
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'config' }, () => later('Config'))
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'config' }, sync)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'collectors' }, oldDatabase)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
                 clearTimeout(this.timers.profile);
                 this.timers.profile = setTimeout(() => this.onProfileChange(), 300);
             });
-        if (this.isEditorProfile()) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: 'entries' }, () => later('Entries'));
+        if (this.isEditorProfile()) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: 'entries' }, oldDatabase);
         if (this.isAdminProfile()) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: 'snapshots' }, () => later('Snapshot'))
             .on('postgres_changes', { event: '*', schema: 'public', table: 'password_reset_requests' }, () => later('ResetRequests'));
-        this.channel = ch.subscribe(status => setLiveBadge(status === 'SUBSCRIBED'));
+        let wasLive = null;
+        this.channel = ch.subscribe(status => {
+            const live = status === 'SUBSCRIBED';
+            setLiveBadge(live);
+            if (live && wasLive === false) sync();   // back online: catch up on anything missed meanwhile
+            wasLive = live;
+        });
     },
     // The Admin changed my role, disabled me or deleted me -> react immediately.
     async onProfileChange() {
@@ -191,6 +377,10 @@ const SupabaseBackend = {
         }
     },
     stop() {
+        this.gen = (this.gen || 0) + 1;
+        this.cursor = { collectors: 0, entries: 0, tombs: 0 };
+        this.synced = { data: null, full: null, settings: null };
+        this._sync = null; this._syncAgain = false;
         Object.values(this.timers).forEach(t => clearTimeout(t)); this.timers = {};
         if (this.channel) { try { this.sb.removeChannel(this.channel); } catch { } this.channel = null; }
     },
@@ -259,44 +449,44 @@ const SupabaseBackend = {
     async requestPasswordReset(username) { await this.rpc('request_password_reset', { p_username: String(username || '').trim().toLowerCase() }); },
     async dismissResetRequest(id) { await this.rpc('admin_dismiss_reset_request', { p_id: id }); await this.refresh('ResetRequests'); },
 
-    /* ---------- daily entries ---------- */
+    /* ---------- daily entries (after a change only the changed rows are downloaded: syncNow) ---------- */
     async addDailyEntry(e) {
         await this.rpc('add_daily_entry', { p_key: e.key, p_date: e.date, p_collection: e.collection, p_penalty: e.penalty,
             p_fixed_prov: e.fixedProv, p_repo: e.repo, p_repo_prov: e.repoProv });
-        await this.refresh('Collectors', 'Entries', 'Config');
+        await this.syncNow();
     },
-    async deleteEntry(id) { await this.rpc('delete_entry', { p_id: id }); await this.refresh('Collectors', 'Entries'); },
+    async deleteEntry(id) { await this.rpc('delete_entry', { p_id: id }); await this.syncNow(); },
 
     /* ---------- telecollectors & config ---------- */
     async saveCollector(oldKey, c) {
         try { await this.rpc('save_collector', { p_old_key: oldKey || null, p: sbToDbCollector(c) }); }
         catch (e) { if (/DUPLICATE/.test(e.message)) throw dupError(c); throw e; }
-        await this.refresh('Collectors', 'Config', 'Entries');
+        await this.syncNow();
     },
-    async deleteCollector(key) { await this.rpc('delete_collector', { p_key: key }); await this.refresh('Collectors'); },
+    async deleteCollector(key) { await this.rpc('delete_collector', { p_key: key }); await this.syncNow(); },
     async saveConfig(patch) {
         const map = { campaigns: 'campaigns', leaders: 'leaders', kpi: 'kpi', currentPeriod: 'current_period', asOf: 'as_of', holidays: 'holidays' };
         const p = {};
         Object.entries(map).forEach(([a, d]) => { if (patch[a] !== undefined) p[d] = patch[a]; });
         await this.rpc('save_config', { p });
-        await this.refresh('Config');
+        await this.syncNow();   // settings_rev changed -> the settings tables are read again
     },
 
-    /* ---------- Data menu (Admin): delete all / reset / undo / import / new month ---------- */
-    async deleteAllData() { await this.rpc('admin_delete_all'); await this.refresh('Collectors', 'Entries', 'Snapshot'); },
+    /* ---------- Data menu (Admin): delete all / reset / undo / import / new month (full_rev goes up -> full reload) ---------- */
+    async deleteAllData() { await this.rpc('admin_delete_all'); await this.syncNow(); },
     async resetToBaseline() {
         const meta = await this.rpc('admin_reset_to_baseline');
-        await this.refresh('Collectors', 'Config', 'Entries', 'Snapshot');
+        await this.syncNow();
         return meta || {};
     },
     async undoLast() {
         const meta = await this.rpc('admin_undo_last');
-        await this.refresh('Collectors', 'Config', 'Entries', 'Snapshot');
+        await this.syncNow();
         return meta || {};
     },
     async startNewMonth() {
         const next = await this.rpc('admin_start_new_month');
-        await this.refresh('Collectors', 'Config', 'Entries', 'Snapshot');
+        await this.syncNow();
         return next;
     },
     async importCollectors({ records, mode, label, meta }) {
@@ -304,11 +494,12 @@ const SupabaseBackend = {
         if (!['replace', 'merge'].includes(mode)) throw new Error('Unknown import mode.');
         const incoming = dedupeCollectors(records).list.map(sbToDbCollector);
         await this.rpc('admin_import_collectors', { p_records: incoming, p_mode: mode, p_label: label, p_meta: meta || {} });
-        await this.refresh('Collectors', 'Config', 'Entries', 'Snapshot');
+        await this.syncNow();
     },
     async exportAll() {
-        const [collectors, entries] = await Promise.all([this.selectAll('collectors', 'key'), this.selectAll('entries', 'ts', false)]);
+        const [collectors, entries] = await Promise.all([this.selectByKey('collectors', '*', 'key'), this.selectAll('entries', 'ts', false)]);
         await this.fetchConfig();
+        await this.fetchSettings();
         return { collectors: collectors.map(sbFromDbCollector), entries: entries.map(sbFromDbEntry) };
     },
 

@@ -3,11 +3,12 @@
    File checks   : .xlsx/.xls only · max size · real Excel file signature (not a renamed file) ·
                    no macros (VBA) · readable / not password-protected · sheet & row limits.
    Content checks: recognised header row · Curing/Recovery detected · valid names & campaigns ·
-                   numbers only (no text, no Excel errors like #DIV/0!) · no negatives · whole numbers for
-                   accounts/repo · Repo ≤ # Accounts · To Retain ≤ Beginning · no duplicate telecollectors ·
+                   numbers only (no text, no Excel errors like #DIV/0!) · no negatives (except Ending) · whole numbers
+                   for accounts/repo · Repo ≤ # Accounts · no duplicate telecollectors ·
                    valid month / "as of" date / holidays / leaders · cross-check of totals between sheets.
-   Apply         : errors block the import; warnings must be ticked; the Admin re-enters their password;
-                   an undo copy of the current data is saved first (Data → Undo).
+   Apply         : errors block the import; warnings must be ticked; rows with unusual but allowed figures (To Retain
+                   more than Beginning, a negative Ending) are listed and the Admin must tick that they were verified;
+                   the Admin re-enters their password; an undo copy of the current data is saved first (Data → Undo).
 
    Understood layouts:
      · Summary_Campaign_Revised.xlsx (current): one sheet per campaign (campaign title in A1, e.g. sheet "AFC" titled
@@ -48,11 +49,11 @@ const IMPORT_HEADERS = {
 };
 // "# OF ACCOUNTS" appears several times: which figure it counts is decided by the column right after it.
 const ACCS_FOR_NEXT = [['ending', 'endingAccs'], ['beginning', 'beginningAccs'], ['toRetain', 'toRetainAccs'], ['fixedProv', 'fixedAccs']];
-// [field, label, whole number?, optional (blank = not provided)?]
+// [field, label, whole number?, optional (blank = not provided)?, may be negative (listed for the Admin to verify)?]
 const IMPORT_NUM_FIELDS = [
     ['accs1', '# of accounts', true], ['collectibles', 'Collectibles'], ['collection', 'Collection'], ['penalty', 'Penalty'],
     ['lmSpCollection', 'Same Period (Collection)', false, true],
-    ['endingAccs', '# of accounts (Ending)', true], ['ending', 'Ending'], ['beginningAccs', '# of accounts (Beginning)', true], ['beginning', 'Beginning'],
+    ['endingAccs', '# of accounts (Ending)', true], ['ending', 'Ending', false, false, true], ['beginningAccs', '# of accounts (Beginning)', true], ['beginning', 'Beginning'],
     ['toRetainAccs', '# of accounts (To Retain)', true], ['toRetain', 'To Retain', false, true],
     ['fixedAccs', '# of accounts (Fixed Provision)', true], ['fixedProv', 'Fixed Provision'], ['lmSpFixedProv', 'Same Period (Provision)', false, true],
     ['repoAge2', '2nd Month'], ['repoAge3', '3rd Month'], ['repoAge4', '4th Month and Up'],
@@ -76,6 +77,7 @@ function openImportModal() {
     $('importApplyWrap').classList.add('hidden');
     $('importChecks').dataset.sig = '';
     renderChecks('importChecks', { errors: [], warnings: [] });
+    renderImportVerify();
     showModal('importModal');
 }
 
@@ -85,6 +87,7 @@ async function handleImportFile(input) {
     importState = null;
     $('importApplyWrap').classList.add('hidden');
     renderChecks('importChecks', { errors: [], warnings: [] });
+    renderImportVerify();
     if (!file) return;
     $('importReport').classList.remove('hidden');
     $('importReport').innerHTML = '<p class="text-slate-500"><i class="fa-solid fa-circle-notch fa-spin"></i> Checking file…</p>';
@@ -203,7 +206,8 @@ function parseImportWorkbook(wb, r) {
         let section = null, foundAny = false;
         rows.forEach((cells, i) => {
             const rowNo = firstRow + i + 1;
-            const map = importHeaderMap(cells);
+            // Only a row with a COLLECTIBLES heading can be a header row: cheap check before matching every heading.
+            const map = cells.some(v => typeof v === 'string' && /COLLECTIBLE/i.test(v)) ? importHeaderMap(cells) : {};
             if (map.name !== undefined && map.collectibles !== undefined && map.collection !== undefined) {
                 if (cells.some(v => importHead(v) === 'HANDLED CAMPAIGNS')) { section = null; if (!r.sheetsSkipped.includes(`${sheetName} (leader table)`)) r.sheetsSkipped.push(`${sheetName} (leader table)`); return; }
                 // Bucket: a title in the 3 rows above (e.g. "CURING", "SOUTH ASIALINK RECOVERY"), else the sheet name.
@@ -219,15 +223,15 @@ function parseImportWorkbook(wb, r) {
                     if (!sheetGeneric) campaign = resolveCampaign(sheetTitle, sheetName);
                     else if (title) campaign = cleanName(title.replace(/RECOVERY|CURRING|CURING/ig, '')) || null;
                 }
-                section = { sheet: sheetName, title: sheetTitle, headerRow: rowNo, map, bucket, campaign, consolidated: map.campaign !== undefined, records: [] };
+                section = { sheet: sheetName, title: sheetTitle, headerRow: rowNo, map, bucket, campaign, consolidated: map.campaign !== undefined, records: [],
+                    numericCols: IMPORT_NUM_FIELDS.map(([f]) => map[f]).filter(c => c !== undefined) };
                 sections.push(section); foundAny = true;
                 return;
             }
             if (!section) return;
             const rawName = cells[section.map.name];
             const nameText = typeof rawName === 'string' ? rawName : '';
-            const numericCols = IMPORT_NUM_FIELDS.map(([f]) => section.map[f]).filter(c => c !== undefined);
-            const hasNumbers = numericCols.some(c => typeof cells[c] === 'number' && cells[c] !== 0);
+            const hasNumbers = section.numericCols.some(c => typeof cells[c] === 'number' && cells[c] !== 0);
             if (!nameText) {
                 if (rawName !== null && typeof rawName !== 'string') r.warnings.push(`${sheetName} row ${rowNo}: the name cell is not text; row skipped.`);
                 else if (hasNumbers) r.warnings.push(`${sheetName} row ${rowNo}: has numbers but no name; row skipped.`);
@@ -267,7 +271,7 @@ function parseImportWorkbook(wb, r) {
     }
     if (cross.length) importCrossCheck(used, cross, r);
 }
-function importNumber(v, label, integer, rec, optional) {
+function importNumber(v, label, integer, rec, optional, signed) {
     if (v === null || v === '') return optional ? null : 0;
     if (typeof v === 'object' && v.error) { rec.errors.push(`${label} contains ${v.error === 'a date' || v.error === 'TRUE/FALSE' ? v.error : 'an Excel error (' + v.error + ')'}`); return optional ? null : 0; }
     let n = v;
@@ -278,8 +282,8 @@ function importNumber(v, label, integer, rec, optional) {
         if (!isFinite(n)) { rec.errors.push(`${label} "${v.slice(0, 30)}" is not a number`); return optional ? null : 0; }
     }
     if (!isFinite(n)) { rec.errors.push(`${label} is not a number`); return optional ? null : 0; }
-    if (n < 0) { rec.errors.push(`${label} is negative (${n})`); return optional ? null : 0; }
-    if (n > 9999999999) { rec.errors.push(`${label} is unrealistically large`); return optional ? null : 0; }
+    if (n < 0 && !signed) { rec.errors.push(`${label} is negative (${n})`); return optional ? null : 0; }
+    if (Math.abs(n) > 9999999999) { rec.errors.push(`${label} is unrealistically large`); return optional ? null : 0; }
     if (integer) {
         if (Math.abs(n - Math.round(n)) > 1e-9) { rec.errors.push(`${label} must be a whole number (${n})`); return optional ? null : 0; }
         return Math.round(n);
@@ -296,10 +300,10 @@ function importRowToRecord(section, cells, rowNo) {
     const campRaw = m.campaign !== undefined ? cells[m.campaign] : section.campaign;
     rec.campaign = typeof campRaw === 'string' ? cleanName(campRaw) : '';
     rec.team = (m.bucket !== undefined ? importBucket(cells[m.bucket]) : null) || section.bucket;
-    IMPORT_NUM_FIELDS.forEach(([f, label, integer, optional]) => {
+    IMPORT_NUM_FIELDS.forEach(([f, label, integer, optional, signed]) => {
         if (m[f] === undefined) { rec[f] = optional ? null : 0; return; }
         rec.has.push(f);
-        rec[f] = importNumber(cells[m[f]], label, integer, rec, optional);
+        rec[f] = importNumber(cells[m[f]], label, integer, rec, optional, signed);
     });
     return rec;
 }
@@ -441,7 +445,6 @@ function validateImportRecords(r) {
         else if (!NAME_RE.test(rec.campaign) || rec.campaign.length > 60) rec.errors.push(`campaign "${rec.campaign}" has invalid characters`);
         if (!rec.team) rec.errors.push('cannot tell if this row is Curing or Recovery (add a BUCKET column or a title row "CURING"/"RECOVERY" above the header)');
         if (rec.accs1 > 0 && rec.repo > rec.accs1) rec.errors.push(`Repo (${rec.repo}) is more than # Accounts (${rec.accs1})`);
-        if (rec.toRetain !== null && rec.beginning > 0 && rec.toRetain > rec.beginning) rec.errors.push('To Retain is more than Beginning');
         if (rec.collectibles > 0 && rec.collection > rec.collectibles) rec.warnings.push('Collection is higher than Collectibles');
         if (rec.toRetain !== null && rec.toRetain > 0 && rec.fixedProv > rec.toRetain) rec.warnings.push('Fixed Provision is higher than To Retain');
         if (rec.penalty > 0 && rec.penalty > rec.collection) rec.warnings.push('Penalty is higher than Collection');
@@ -455,15 +458,18 @@ function validateImportRecords(r) {
             else seen.set(rec.key, rec);
         }
     });
-    // Similar names in the same campaign + bucket (possible typos)
-    const byGroup = {};
-    r.records.filter(x => x.key).forEach(x => { (byGroup[`${x.campaign}|${x.team}`] = byGroup[`${x.campaign}|${x.team}`] || []).push(x); });
-    Object.values(byGroup).forEach(list => list.forEach((x, i) => list.slice(i + 1).forEach(y => {
-        if (x.key !== y.key && levenshtein(slug(x.name), slug(y.name)) <= 2) r.warnings.push(`Similar names in ${x.campaign} ${x.team}: "${x.name}" (${x.where}) and "${y.name}" (${y.where}). Same person?`);
-    })));
+    // Similar names in the same campaign + bucket (possible typos). Names are only compared within their own campaign + bucket.
+    const keyed = r.records.filter(x => x.key), slugs = new Map(keyed.map(x => [x, slug(x.name)]));
+    groupBy(keyed, x => `${x.campaign}|${x.team}`).forEach(list => list.forEach((x, i) => {
+        for (let j = i + 1; j < list.length; j++) {
+            const y = list[j];
+            if (x.key !== y.key && withinEdits(slugs.get(x), slugs.get(y), 2)) r.warnings.push(`Similar names in ${x.campaign} ${x.team}: "${x.name}" (${x.where}) and "${y.name}" (${y.where}). Same person?`);
+        }
+    }));
     // Similar to an existing telecollector under a different spelling
-    r.records.filter(x => x.key && !findCollector(x.key)).forEach(x => {
-        const twin = state.collectors.find(c => c.campaign === x.campaign && c.team === x.team && levenshtein(slug(c.name), slug(x.name)) <= 2);
+    const existing = dataIndex().byGroup;
+    keyed.filter(x => !findCollector(x.key)).forEach(x => {
+        const twin = (existing.get(`${x.campaign}|${x.team}`) || []).find(c => withinEdits(nameSlug(c), slugs.get(x), 2));
         if (twin) r.warnings.push(`"${x.name}" (${x.where}) looks like existing "${twin.name}" in ${x.campaign} ${x.team}. A spelling change will create a new telecollector.`);
     });
     r.records.forEach(x => {
@@ -567,6 +573,55 @@ function renderImportReport(r) {
     $('importApplyBtn').disabled = r.errors.length > 0;
     $('importApplyBtn').title = r.errors.length ? 'Fix the errors in the Excel file, then choose it again.' : '';
     r.shown = shown;
+    renderImportVerify(r);
+}
+
+// What the import writes. "Update & add": a column that is not in the file keeps the telecollector's current value.
+function importFinalRecords(r, mode) {
+    return r.records.map(x => {
+        const ex = mode === 'merge' ? findCollector(x.key) : null, out = { campaign: x.campaign, team: x.team, name: x.name };
+        IMPORT_FIELDS.forEach(f => { out[f] = ex && !x.has.includes(f) ? ex[f] : x[f]; });
+        return out;
+    });
+}
+const importMode = () => document.querySelector('input[name="importMode"]:checked').value;
+
+// Unusual figures that are allowed but must be verified. They do not block the import: the rows that would be saved with
+// them (for the chosen mode) are listed, and the Admin must tick that they were checked against the file.
+const amtAccts = (n, k) => `${fmtNum(n)}${k ? ` <span class="text-slate-400">(${fmtInt(k)} acc.)</span>` : ''}`;
+const IMPORT_VERIFY = [
+    { title: 'To Retain is more than Beginning', note: 'Each figure has its own # of accounts, so this can happen.',
+      test: o => o.toRetain !== null && o.beginning > 0 && o.toRetain > o.beginning,
+      heads: ['Beginning', 'To Retain', 'More by'],
+      cells: o => [amtAccts(o.beginning, o.beginningAccs), amtAccts(o.toRetain, o.toRetainAccs), `<b class="text-amber-800">${fmtNum(o.toRetain - o.beginning)}</b>`] },
+    { title: 'Ending is negative', note: 'Check that the minus sign is intended.',
+      test: o => o.ending < 0,
+      heads: ['Ending'],
+      cells: o => [`<b class="text-amber-800">${amtAccts(o.ending, o.endingAccs)}</b>`] }
+];
+function importVerifyCheck(r, mode) {
+    const records = importFinalRecords(r, mode), pairs = records.map((o, i) => [o, r.records[i]]);
+    const groups = IMPORT_VERIFY.map(def => ({ def, rows: pairs.filter(([o]) => def.test(o)) })).filter(g => g.rows.length);
+    return { records, groups, count: new Set(groups.flatMap(g => g.rows.map(([, x]) => x))).size,
+        sig: groups.map(g => g.def.title + '\n' + g.rows.map(([o, x]) => `${x.key}|${o.beginning}|${o.toRetain}|${o.ending}`).join('\n')).join('\n') };
+}
+// Ticked for exactly the rows on screen (the tick is cleared when the list changes).
+const importVerified = v => !v.count || ($('importVerify').dataset.sig === v.sig && !!$('importVerifyAck') && $('importVerifyAck').checked);
+
+function renderImportVerify(r = importState) {
+    const box = $('importVerify'), v = r && !r.fatal ? importVerifyCheck(r, importMode()) : { count: 0, sig: '' };
+    if (!v.count) { box.innerHTML = ''; box.classList.add('hidden'); box.dataset.sig = ''; return; }
+    const keep = importVerified(v), n = v.count;
+    box.dataset.sig = v.sig;
+    box.classList.remove('hidden');
+    box.innerHTML = `<p class="font-bold text-amber-800"><i class="fa-solid fa-magnifying-glass"></i> Verify before importing: ${n} row${n > 1 ? 's have' : ' has'} unusual figures</p>` +
+        v.groups.map(({ def, rows }) => `
+        <p class="font-semibold text-slate-800 mt-2">${esc(def.title)} (${rows.length}) <span class="font-normal text-slate-500">· ${esc(def.note)}</span></p>
+        <div class="overflow-x-auto max-h-48 overflow-y-auto"><table class="w-full text-left">
+            <thead><tr class="text-[10px] font-bold text-slate-500 uppercase border-b border-amber-200"><th class="py-1 pr-2">Sheet / row</th><th class="py-1 pr-2">Campaign</th><th class="py-1 pr-2">Telecollector</th>${def.heads.map(h => `<th class="py-1 pr-2 text-right">${esc(h)}</th>`).join('')}</tr></thead>
+            <tbody>${rows.map(([o, x]) => `<tr class="border-b border-amber-100"><td class="py-1 pr-2 whitespace-nowrap">${esc(x.where)}</td><td class="py-1 pr-2">${esc(o.campaign)} ${o.team === 'recovery' ? 'Recovery' : 'Curing'}</td><td class="py-1 pr-2 font-semibold">${esc(o.name)}</td>${def.cells(o).map(c => `<td class="py-1 pr-2 text-right whitespace-nowrap">${c}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table></div>`).join('') +
+        `<label class="flex items-center gap-2 font-semibold text-slate-800 mt-2"><input type="checkbox" id="importVerifyAck" ${keep ? 'checked' : ''}> I verified ${n > 1 ? `these ${n} rows` : 'this row'} against the Excel file: the figures are correct.</label>`;
 }
 
 /* ===================== 5. APPLY ===================== */
@@ -575,16 +630,16 @@ async function applyImport() {
     const r = importState;
     if (!r || r.fatal || r.errors.length) return toast('Fix the errors first.', 'err');
     if (!checksPass('importChecks', r.shown)) return;
-    const mode = document.querySelector('input[name="importMode"]:checked').value;
+    // The verified list and the records written come from the same computation.
+    const mode = importMode(), v = importVerifyCheck(r, mode), records = v.records, n = v.count;
+    if (!importVerified(v)) {
+        renderImportVerify(r);
+        $('importVerify').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        return toast(`Verify the ${n} row${n > 1 ? 's' : ''} under "Verify before importing", then tick the box.`, 'err');
+    }
     const ok = await askAdminPassword('Confirm Excel import',
-        `${mode === 'replace' ? 'REPLACE all current data with' : 'Update & add'} ${r.records.length} telecollectors from "${r.fileName}". An undo copy of the current data is saved first. Enter your Admin password to continue.`);
+        `${mode === 'replace' ? 'REPLACE all current data with' : 'Update & add'} ${records.length} telecollectors from "${r.fileName}"${n ? `, including ${n} verified row${n > 1 ? 's' : ''} (${v.groups.map(g => `${g.def.title}: ${g.rows.length}`).join('; ')})` : ''}. An undo copy of the current data is saved first. Enter your Admin password to continue.`);
     if (!ok || !isAdmin()) return;
-    // "Update & add": a column that is not in the file keeps the telecollector's current value.
-    const records = r.records.map(x => {
-        const ex = mode === 'merge' ? findCollector(x.key) : null, out = { campaign: x.campaign, team: x.team, name: x.name };
-        IMPORT_FIELDS.forEach(f => { out[f] = ex && !x.has.includes(f) ? ex[f] : x[f]; });
-        return out;
-    });
     const meta = {};
     if (r.info && r.info.month) meta.period = r.info.month;
     if (r.info && r.info.asOf) meta.as_of = r.info.asOf;

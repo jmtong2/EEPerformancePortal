@@ -1,10 +1,10 @@
 /* Add / edit / delete telecollectors (Admin & Management). */
 
-// [input id, field, kind]  kind: int | money | optMoney | optInt   (same fields as the Excel file)
+// [input id, field, kind]  kind: int | money | signedMoney (may be below 0) | optMoney | optInt   (same fields as the Excel file)
 const TELE_FIELDS = [
     ['teleAccs', 'accs1', 'int'], ['teleCollectibles', 'collectibles', 'money'], ['teleCollection', 'collection', 'money'], ['telePenalty', 'penalty', 'money'],
     ['teleSpCollection', 'lmSpCollection', 'optMoney'],
-    ['teleEndingAccs', 'endingAccs', 'int'], ['teleEnding', 'ending', 'money'], ['teleBeginningAccs', 'beginningAccs', 'int'], ['teleBeginning', 'beginning', 'money'],
+    ['teleEndingAccs', 'endingAccs', 'int'], ['teleEnding', 'ending', 'signedMoney'], ['teleBeginningAccs', 'beginningAccs', 'int'], ['teleBeginning', 'beginning', 'money'],
     ['teleToRetainAccs', 'toRetainAccs', 'int'], ['teleToRetain', 'toRetain', 'optMoney'], ['teleFixedAccs', 'fixedAccs', 'int'], ['teleFixedProv', 'fixedProv', 'money'],
     ['teleSpFixedProv', 'lmSpFixedProv', 'optMoney'],
     ['teleRepoAge2', 'repoAge2', 'money'], ['teleRepoAge3', 'repoAge3', 'money'], ['teleRepoAge4', 'repoAge4', 'money'],
@@ -48,10 +48,12 @@ function validateTele(submit) {
     TELE_FIELDS.forEach(([id, field, kind]) => {
         const label = TELE_LABELS[field];
         f[field] = kind === 'int' ? readInt(id, label, errors) : kind === 'optInt' ? readOptInt(id, label, errors)
-            : kind === 'optMoney' ? readOptMoney(id, label, errors) : readMoney(id, label, errors);
+            : kind === 'optMoney' ? readOptMoney(id, label, errors) : readMoney(id, label, errors, kind === 'signedMoney');
     });
 
-    if (f.toRetain !== null && f.beginning > 0 && f.toRetain > f.beginning) errors.push('To Retain cannot be greater than Beginning.');
+    // Allowed, but they have to be confirmed with the tick box (To Retain: each provision figure has its own # of accounts).
+    if (f.toRetain !== null && f.beginning > 0 && f.toRetain > f.beginning) warnings.push('To Retain is more than Beginning. Check both figures.');
+    if (f.ending < 0) warnings.push('Ending is negative. Check that the minus sign is intended.');
     if (f.accs1 > 0 && f.repo > f.accs1) errors.push('Repo actual (units) cannot be more than # of accounts.');
     if (submit || oldKey) {
         if (!f.accs1) warnings.push('# of accounts is 0.');
@@ -69,8 +71,11 @@ function validateTele(submit) {
     if (name && campaign && c.key !== oldKey) {
         const ex = findCollector(c.key);
         if (ex) { dupKey = ex.key; errors.push(`${ex.name} already exists in ${ex.campaign} (${ex.team}). Use "Daily Log-in Entry" to add production instead.`); }
-        else state.collectors.filter(o => o.campaign === campaign && o.key !== oldKey && levenshtein(slug(o.name), slug(name)) <= 2)
-            .forEach(o => warnings.push(`Similar name already exists: ${o.name} (${o.team}). Make sure this is not the same person.`));
+        else {
+            const s = slug(name);   // runs on every key press in the form: only this campaign's telecollectors are compared
+            (dataIndex().byCampaign.get(campaign) || []).filter(o => o.key !== oldKey && withinEdits(nameSlug(o), s, 2))
+                .forEach(o => warnings.push(`Similar name already exists: ${o.name} (${o.team}). Make sure this is not the same person.`));
+        }
     }
     return { errors, warnings, c, oldKey, dupKey };
 }

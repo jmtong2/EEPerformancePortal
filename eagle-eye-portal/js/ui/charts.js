@@ -9,8 +9,8 @@ const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#
 // A campaign's colour = its place in the alphabetical list of all campaigns with telecollectors (not the filtered list,
 // so the campaign filter and search never repaint a campaign). null past the 8th.
 function campaignColor(name) {
-    const i = uniq(state.collectors.map(c => c.campaign)).sort().indexOf(name);
-    return i >= 0 && i < SERIES_COLORS.length ? SERIES_COLORS[i] : null;
+    const i = dataIndex().colorIndex.get(name);
+    return i !== undefined && i < SERIES_COLORS.length ? SERIES_COLORS[i] : null;
 }
 const chartRegistry = {};
 

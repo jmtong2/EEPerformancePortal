@@ -94,6 +94,28 @@ function buildScaffold() {
 /* ---------- main render ---------- */
 function switchTab(tabId) { currentActiveTab = tabId; renderDashboard(); }
 
+// Data refreshes that arrive together end in one render.
+let _renderQueued = false;
+function scheduleRender() {
+    if (_renderQueued) return;
+    _renderQueued = true;
+    setTimeout(() => { _renderQueued = false; renderDashboard(); }, 0);
+}
+// Search re-renders once typing pauses, not on every key.
+const onSearchInput = debounce(() => renderDashboard(), 150);
+
+// Long tables show TABLE_PAGE rows at a time ("Show more"); back to one page when the filter or search changes.
+const TABLE_PAGE = 200;
+const tableLimit = { curing: TABLE_PAGE, recovery: TABLE_PAGE, entries: TABLE_PAGE };
+let _filterSig = '';
+function showMoreRows(table, all) { tableLimit[table] = all ? Infinity : tableLimit[table] + TABLE_PAGE; renderDashboard(); }
+function moreRowsHtml(table, shown, total, colspan) {
+    if (shown >= total) return '';
+    return `<tr><td colspan="${colspan}" class="py-3 text-center text-xs text-slate-500">Showing ${fmtInt(shown)} of ${fmtInt(total)} ·
+        <button onclick="showMoreRows('${table}')" class="font-semibold text-indigo-600 hover:underline">Show ${fmtInt(Math.min(TABLE_PAGE, total - shown))} more</button> ·
+        <button onclick="showMoreRows('${table}', true)" class="font-semibold text-indigo-600 hover:underline">Show all</button></td></tr>`;
+}
+
 function renderDashboard() {
     if (!currentUser) return;
     applyRoleVisibility();
@@ -108,23 +130,31 @@ function renderDashboard() {
     renderResetBadge();
     if (!$('usersModal').classList.contains('hidden')) renderResetRequests();
 
-    const sel = $('campaignFilterSelect'), prev = sel.value || 'ALL';
-    sel.innerHTML = `<option value="ALL">ALL CAMPAIGNS UNIFIED</option>` + allCampaigns().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-    sel.value = allCampaigns().includes(prev) ? prev : 'ALL';
+    // The campaign list is rebuilt only when it changes (allCampaigns() returns the same array until then).
+    const sel = $('campaignFilterSelect'), prev = sel.value || 'ALL', camps = allCampaigns();
+    if (sel._campaigns !== camps) {
+        sel.innerHTML = `<option value="ALL">ALL CAMPAIGNS UNIFIED</option>` + camps.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        sel._campaigns = camps;
+    }
+    sel.value = camps.includes(prev) ? prev : 'ALL';
 
     const q = $('searchInput').value.toLowerCase(), camp = sel.value;
-    const filtered = state.collectors.filter(i => (i.name.toLowerCase().includes(q) || i.campaign.toLowerCase().includes(q)) && (camp === 'ALL' || i.campaign === camp));
+    const filtered = !q && camp === 'ALL' ? state.collectors
+        : state.collectors.filter(i => (camp === 'ALL' || i.campaign === camp) && (!q || i.name.toLowerCase().includes(q) || i.campaign.toLowerCase().includes(q)));
+    const sig = `${q}|${camp}`;
+    if (sig !== _filterSig) { _filterSig = sig; Object.keys(tableLimit).forEach(k => tableLimit[k] = TABLE_PAGE); }
 
-    renderCards(filtered);
-    renderLastMonthCard(filtered);
+    const totals = sumStats(filtered);
+    renderCards(totals);
+    renderLastMonthCard(totals);
 
     ['companySection', 'curingSection', 'recoverySection', 'campaignSummarySection', 'tlSection', 'omSection', 'gmSection', 'entriesSection'].forEach(id => $(id).classList.add('hidden'));
     const tele = ['all', 'curing', 'recovery'].includes(currentActiveTab);
     $('telemetryHeaderContainer').style.display = tele ? '' : 'none';
     $('accessLevelNotice').innerText = isAdmin() ? 'Mode: Admin (Full Access)' : canEdit() ? 'Mode: Management (Edit Access)' : 'Mode: Analyst (View Only)';
     $('emptyNotice').classList.toggle('hidden', state.collectors.length > 0);
-    // Supabase database still on an older setup script (the v9 SQL adds the TL / OM & AOM / GM lists and Admin-only leader changes).
-    $('upgradeNotice').classList.toggle('hidden', !(isAdmin() && Backend && Backend.mode === 'cloud' && state.schemaVersion !== null && state.schemaVersion < 9));
+    // Supabase database still on an older setup script (schema 11: negative Ending; 10: To Retain above Beginning; 9: typed tables, leader lists).
+    $('upgradeNotice').classList.toggle('hidden', !(isAdmin() && Backend && Backend.mode === 'cloud' && state.schemaVersion !== null && state.schemaVersion < 11));
 
     if (currentActiveTab.startsWith('co-')) {
         $('companySection').classList.remove('hidden');
@@ -148,8 +178,8 @@ function renderDashboard() {
     }
 }
 
-function renderCards(filtered) {
-    const t = sumStats(filtered);
+// t = sumStats of the filtered telecollectors (worked out once per render).
+function renderCards(t) {
     $('cardCollectibles').innerText = formatPHP(t.collectibles);
     $('cardCollection').innerText = formatPHP(t.collection);
     $('cardLiqRate').innerText = `${t.effRate.toFixed(1)}% Efficiency Rate`;
@@ -162,9 +192,8 @@ function renderCards(filtered) {
 }
 
 // Upper-right card: SAME PERIOD collection (last month at the same point of the month) for the current filter,
-// compared with this month so far.
-function renderLastMonthCard(filtered) {
-    const s = sumStats(filtered);
+// compared with this month so far. s = sumStats of the filtered telecollectors.
+function renderLastMonthCard(s) {
     $('lmCardPeriod').innerText = periodLabel(shiftPeriod(currentPeriod(), -1));
     if (s.lmSpCollection === null) {
         $('lmCardValue').innerHTML = DASH;
@@ -181,9 +210,9 @@ function renderLastMonthCard(filtered) {
 const tableCols = withAction => 4 + METRIC_COLS.length + 1 + (withAction ? 1 : 0);
 
 function renderTeleTable(team, filtered, color) {
-    const ranked = rankedTeles(team, filtered), edit = canEdit();
+    const ranked = rankedTeles(team, filtered), edit = canEdit(), shown = ranked.slice(0, tableLimit[team]);
     $(`${team}Count`).innerText = `${ranked.length} Specialists`;
-    $(`${team}TableBody`).innerHTML = ranked.map(i => {
+    $(`${team}TableBody`).innerHTML = shown.map(i => {
         const k = esc(i.key);
         const actions = !edit ? '' : `<td class="${TD} text-center whitespace-nowrap">
             <button onclick="openEntryModal('${k}')" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-plus"></i> Entry</button>
@@ -197,7 +226,8 @@ function renderTeleTable(team, filtered, color) {
             <td class="${TD} text-center font-extrabold text-${color}-600 bg-${color}-50/40 border-l border-r border-${color}-100 text-sm">${i.kpiRate.toFixed(1)}%</td>
             ${actions}
         </tr>`;
-    }).join('') || `<tr><td colspan="${tableCols(edit)}" class="py-6 text-center text-xs text-slate-400">No telecollectors match.</td></tr>`;
+    }).join('') + moreRowsHtml(team, shown.length, ranked.length, tableCols(edit))
+        || `<tr><td colspan="${tableCols(edit)}" class="py-6 text-center text-xs text-slate-400">No telecollectors match.</td></tr>`;
 }
 
 function renderLeaderTable(type, q, camp) {
@@ -254,7 +284,7 @@ function renderCampaignSummary() {
 function renderEntries(q, camp) {
     const list = state.entries.filter(e => ((e.name || '').toLowerCase().includes(q) || (e.byName || '').toLowerCase().includes(q) || (e.campaign || '').toLowerCase().includes(q)) && (camp === 'ALL' || e.campaign === camp));
     $('entriesCount').innerText = `${list.length} Entries`;
-    $('entriesTableBody').innerHTML = list.map(e => `<tr class="${ROW}">
+    $('entriesTableBody').innerHTML = list.slice(0, tableLimit.entries).map(e => `<tr class="${ROW}">
         <td class="${TD} font-semibold whitespace-nowrap">${esc(e.date)}</td>
         <td class="${TD} text-slate-500 whitespace-nowrap">${esc(fmtDateTime(e.ts))}</td>
         <td class="${TD} font-semibold text-slate-700">${esc(e.byName)}</td>
@@ -268,5 +298,6 @@ function renderEntries(q, camp) {
         <td class="${TD} text-center">${entryUndoable(e)
             ? `<button onclick="handleDeleteEntry('${esc(e.id)}')" class="bg-rose-50 hover:bg-rose-100 text-rose-600 px-2.5 py-1 rounded-lg text-xs font-semibold"><i class="fa-solid fa-rotate-left"></i> Undo</button>`
             : '<span class="text-[10px] text-slate-400">Before last import</span>'}</td>
-    </tr>`).join('') || `<tr><td colspan="11" class="py-6 text-center text-xs text-slate-400">No daily entries yet.</td></tr>`;
+    </tr>`).join('') + moreRowsHtml('entries', Math.min(list.length, tableLimit.entries), list.length, 11)
+        || `<tr><td colspan="11" class="py-6 text-center text-xs text-slate-400">No daily entries yet.</td></tr>`;
 }

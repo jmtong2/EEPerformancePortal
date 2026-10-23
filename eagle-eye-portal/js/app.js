@@ -19,7 +19,7 @@ window.addEventListener('load', async () => {
     setLiveBadge(false);
     $('loginForm').classList.add('hidden');
     $('authConnecting').classList.remove('hidden');
-    try { await Backend.init(() => renderDashboard(), onAuthChanged); }
+    try { await Backend.init(() => scheduleRender(), onAuthChanged); }
     catch (e) {
         $('authConnecting').classList.add('hidden');
         $('loginForm').classList.remove('hidden');

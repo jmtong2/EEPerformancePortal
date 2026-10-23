@@ -43,6 +43,7 @@ Before going further:
 - **The "Curing" / "Recovery" summary sheets** (with a CAMPAIGN column) are used instead when they have rows.
 - **VARIANCE columns in the file are ignored.** The portal computes every %, VARIANCE and ON TRACK figure itself.
 - **Blank cells:** a blank TO RETAIN, TARGET or SAME PERIOD means "not provided" and shows as "—". Other blank cells count as 0.
+- **TO RETAIN more than BEGINNING** (each figure has its own # OF ACCOUNTS) and a **negative ENDING** are allowed. The import window lists those rows (sheet, row, the figures) under "Verify before importing", and the Admin must tick that they were verified before the import can continue. Every other figure must be 0 or more.
 
 ## What's on the dashboard
 - **Cards:** Total Collectibles · Collection Total (Efficiency Rate) · Penalty Recovered (Penalty Rate = Penalty ÷ Collection) · Fixed Provision Total (ACH %) · Repo Units (% of accounts).
@@ -104,4 +105,9 @@ eagle-eye-portal/
 ## Notes for developers
 - Scripts are plain `<script>` tags in a fixed order (bottom of `index.html`), so the page also works when opened as a file.
 - **Local mode** is an in-browser stand-in for the Supabase client. It runs the same database functions and checks, and stores passwords as salted PBKDF2 hashes in `localStorage`.
-- **Supabase:** tables are read-only through the API (row-level security). All writes are role-checked functions that each run as one transaction.
+- **Supabase:** tables are read-only through the API (row-level security). All writes are role-checked functions that each run as one transaction. Every value has its own typed column; the table list is in `docs/SUPABASE-SETUP.md`.
+- **Large data (tested with 5,000 telecollectors):**
+  - Each change bumps a counter in the one `config` row. Realtime watches only that row, and each PC then downloads only the rows changed since its last sync (indexed `updated_at`, plus `sync_tombstones` for deletions). Bulk changes (import, undo, new month) trigger one full reload.
+  - Row-level security checks run once per query (`(select is_active())`), and full loads page by key instead of by offset.
+  - In the browser, lookups use indexes built once per data load, totals are worked out in one pass, KPI rates and per-campaign totals are cached, long tables show 200 rows at a time, and Search waits for typing to pause.
+  - Local mode keeps its data parsed in memory and saves it in a compact column format, about half the size.

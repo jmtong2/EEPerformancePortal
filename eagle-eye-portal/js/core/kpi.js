@@ -24,37 +24,60 @@ function kpiBreakdown(i) {
     });
     return { kpi: wsum ? (total / wsum) * 100 : 0, parts };
 }
-function calculateKPIRate(i) { return kpiBreakdown(i).kpi; }
+// KPI Rate of one telecollector, worked out once per record and KPI settings (records are replaced, never changed in place).
+let _kpiCache = { cfg: undefined, sig: '', map: new WeakMap() };
+function calculateKPIRate(i) {
+    calculateKPIRate.sync();
+    let v = _kpiCache.map.get(i);
+    if (v === undefined) { v = kpiBreakdown(i).kpi; _kpiCache.map.set(i, v); }
+    return v;
+}
+// Starts a fresh cache when the KPI settings really changed (a new but identical settings object keeps it).
+calculateKPIRate.sync = () => {
+    if (_kpiCache.cfg === state.kpi) return;
+    const sig = JSON.stringify(state.kpi);
+    _kpiCache = sig === _kpiCache.sig ? { ..._kpiCache, cfg: state.kpi } : { cfg: state.kpi, sig, map: new WeakMap() };
+};
 
 /* ---------- totals ----------
    Optional figures (To Retain, Target Repo, last-month figures) are summed only over the telecollectors that have them,
-   and each is compared with the actuals of exactly those telecollectors, so a partly-filled file never skews a %. */
-function sumOpt(list, field, actualField) {
-    const have = list.filter(i => i[field] !== null && i[field] !== undefined);
-    if (!have.length) return { value: null, actual: 0 };
-    return { value: round2(have.reduce((a, i) => a + num(i[field]), 0)), actual: round2(have.reduce((a, i) => a + num(i[actualField]), 0)) };
+   and each is compared with the actuals of exactly those telecollectors, so a partly-filled file never skews a %.
+   One pass over the list for everything. */
+const SUM_FIELDS = ['collectibles', 'collection', 'penalty', 'repo', 'repoProv', 'beginning', 'principalBal', 'fixedProv', 'accs1',
+    'ending', 'endingAccs', 'beginningAccs', 'toRetainAccs', 'fixedAccs', 'repoAge2', 'repoAge3', 'repoAge4'];
+// [optional field, the actual it is compared with, total name, actual-total name]
+const OPT_SUMS = [['toRetain', 'fixedProv', 'toRetain', 'fixedForRetain'], ['targetRepo', 'repo', 'targetRepoMonth', 'repoForTarget'],
+    ['lmCollection', 'collection', 'lmCollection', 'collectionForLm'], ['lmSpCollection', 'collection', 'lmSpCollection', 'collectionForSp'],
+    ['lmFixedProv', 'fixedProv', 'lmFixedProv', 'fixedForLm'], ['lmSpFixedProv', 'fixedProv', 'lmSpFixedProv', 'fixedForSp'],
+    ['lmRepo', 'repo', 'lmRepo', 'repoForLm'], ['lmSpRepo', 'repo', 'lmSpRepo', 'repoForSp']];
+// Raw (not yet rounded) totals of a list. Parts of several lists can be added together before rounding (addParts).
+function sumParts(list) {
+    const s = {}, n = new Array(OPT_SUMS.length).fill(0), val = n.slice(), act = n.slice();
+    for (const k of SUM_FIELDS) s[k] = 0;
+    for (const i of list) {
+        for (const k of SUM_FIELDS) s[k] += num(i[k]);
+        for (let j = 0; j < OPT_SUMS.length; j++) {
+            const v = i[OPT_SUMS[j][0]];
+            if (v !== null && v !== undefined) { n[j]++; val[j] += num(v); act[j] += num(i[OPT_SUMS[j][1]]); }
+        }
+    }
+    return { s, n, val, act };
 }
-function sumStats(list) {
-    const s = { collectibles: 0, collection: 0, penalty: 0, repo: 0, repoProv: 0, beginning: 0, principalBal: 0, fixedProv: 0, accs1: 0,
-        ending: 0, endingAccs: 0, beginningAccs: 0, toRetainAccs: 0, fixedAccs: 0, repoAge2: 0, repoAge3: 0, repoAge4: 0 };
-    list.forEach(i => Object.keys(s).forEach(k => s[k] += num(i[k])));
-    Object.keys(s).forEach(k => s[k] = round2(s[k]));
-    const ret = sumOpt(list, 'toRetain', 'fixedProv'), trep = sumOpt(list, 'targetRepo', 'repo');
-    const lmC = sumOpt(list, 'lmCollection', 'collection'), spC = sumOpt(list, 'lmSpCollection', 'collection');
-    const lmF = sumOpt(list, 'lmFixedProv', 'fixedProv'), spF = sumOpt(list, 'lmSpFixedProv', 'fixedProv');
-    const lmR = sumOpt(list, 'lmRepo', 'repo'), spR = sumOpt(list, 'lmSpRepo', 'repo');
-    Object.assign(s, {
-        toRetain: ret.value, fixedForRetain: ret.actual,
-        targetRepoMonth: trep.value, repoForTarget: trep.actual,
-        lmCollection: lmC.value, collectionForLm: lmC.actual, lmSpCollection: spC.value, collectionForSp: spC.actual,
-        lmFixedProv: lmF.value, fixedForLm: lmF.actual, lmSpFixedProv: spF.value, fixedForSp: spF.actual,
-        lmRepo: lmR.value, repoForLm: lmR.actual, lmSpRepo: spR.value, repoForSp: spR.actual
-    });
+function addParts(a, b) {   // returns new parts; a and b are not changed (they may be cached)
+    const s = {};
+    for (const k of SUM_FIELDS) s[k] = a.s[k] + b.s[k];
+    return { s, n: a.n.map((x, j) => x + b.n[j]), val: a.val.map((x, j) => x + b.val[j]), act: a.act.map((x, j) => x + b.act[j]) };
+}
+function finishStats({ s: raw, n, val, act }) {
+    const s = {};
+    for (const k of SUM_FIELDS) s[k] = round2(raw[k]);
+    OPT_SUMS.forEach(([, , total, actual], j) => { s[total] = n[j] ? round2(val[j]) : null; s[actual] = n[j] ? round2(act[j]) : 0; });
     s.effRate = pct(s.collection, s.collectibles);
     s.penRate = pct(s.penalty, s.collection);
     s.achRate = s.toRetain === null ? null : pct(s.fixedForRetain, s.toRetain);
     return s;
 }
+function sumStats(list) { return finishStats(sumParts(list)); }
 
 // ON TRACK figures for a set of totals as of `prog` (from bdProgress):
 //   Collection = Collectibles ÷ business days in the month × business days up to today (today included)
@@ -70,13 +93,33 @@ function targetsFor(s, prog) {
 // % change of this month vs last month's same period (null when last month's figure is missing or zero).
 function samePeriodChange(current, lmSp) { return lmSp === null || !(lmSp > 0) ? null : ((current - lmSp) / lmSp) * 100; }
 
+// Per-campaign totals (raw parts + KPI sums), worked out once per telecollector list and KPI settings.
+let _campaignTotals = { list: null, kpi: null, map: null };
+function campaignTotals() {
+    calculateKPIRate.sync();
+    if (_campaignTotals.list === state.collectors && _campaignTotals.kpi === _kpiCache.sig) return _campaignTotals.map;
+    const map = new Map();
+    dataIndex().byCampaign.forEach((members, campaign) => {
+        let wsum = 0, wkpi = 0, kpiSum = 0;
+        for (const m of members) { const k = calculateKPIRate(m); wsum += m.collectibles; wkpi += k * m.collectibles; kpiSum += k; }
+        map.set(campaign, { parts: sumParts(members), count: members.length, wsum, wkpi, kpiSum });
+    });
+    _campaignTotals = { list: state.collectors, kpi: _kpiCache.sig, map };
+    return map;
+}
 // Leader (TL/OM/GM) stats: totals of their campaigns; KPI = collectibles-weighted average of member KPIs.
+// Adds up the cached campaign totals instead of going through every telecollector again for every leader.
 function getConsolidatedStats(campaigns) {
-    const members = state.collectors.filter(c => campaigns.includes(c.campaign));
-    const s = sumStats(members);
-    const wsum = members.reduce((a, m) => a + m.collectibles, 0);
-    s.kpiRate = members.length ? (wsum > 0 ? members.reduce((a, m) => a + calculateKPIRate(m) * m.collectibles, 0) / wsum : members.reduce((a, m) => a + calculateKPIRate(m), 0) / members.length) : 0;
-    s.memberCount = members.length;
+    const totals = campaignTotals();
+    let parts = null, count = 0, wsum = 0, wkpi = 0, kpiSum = 0;
+    for (const c of uniq(campaigns)) {
+        const t = totals.get(c); if (!t) continue;
+        parts = parts ? addParts(parts, t.parts) : t.parts;
+        count += t.count; wsum += t.wsum; wkpi += t.wkpi; kpiSum += t.kpiSum;
+    }
+    const s = finishStats(parts || sumParts([]));
+    s.kpiRate = count ? (wsum > 0 ? wkpi / wsum : kpiSum / count) : 0;
+    s.memberCount = count;
     return s;
 }
 
@@ -103,5 +146,6 @@ function rankedLeaders(type, campaignFilter = 'ALL') {
         .filter(i => campaignFilter === 'ALL' || i.campaigns.includes(campaignFilter)), 'kpiRate', hasKpi);
 }
 function campaignStatsList(list = state.collectors) {
-    return uniq(list.map(c => c.campaign)).map(name => ({ name, ...sumStats(list.filter(c => c.campaign === name)) }));
+    const groups = list === state.collectors ? dataIndex().byCampaign : groupBy(list, c => c.campaign);
+    return [...groups].filter(([name]) => name).map(([name, members]) => ({ name, ...sumStats(members) }));
 }

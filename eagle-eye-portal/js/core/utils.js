@@ -29,13 +29,37 @@ function validUsername(u) { return /^[a-z0-9._-]{3,30}$/.test(u); }
 // Minimum length for new passwords (js/config.js; 6 if an older config.js does not set it).
 const minPasswordLength = () => (typeof MIN_PASSWORD_LENGTH === 'number' && MIN_PASSWORD_LENGTH >= 6 ? MIN_PASSWORD_LENGTH : 6);
 
-function levenshtein(a, b) {
-    if (Math.abs(a.length - b.length) > 3) return 99;
-    const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
-    for (let j = 1; j <= b.length; j++) d[0][j] = j;
-    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
-        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    return d[a.length][b.length];
+// True when a and b differ by at most `max` single-letter edits (add, remove, replace): used to spot spelling variants.
+// Two rows of memory, and it stops as soon as a whole row is over `max` (most names fail after a few letters).
+function withinEdits(a, b, max = 2) {
+    if (a === b) return true;
+    if (Math.abs(a.length - b.length) > max) return false;
+    let prev = new Array(b.length + 1), cur = new Array(b.length + 1);
+    for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+        cur[0] = i;
+        let rowMin = i;
+        for (let j = 1; j <= b.length; j++) {
+            const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1));
+            cur[j] = v;
+            if (v < rowMin) rowMin = v;
+        }
+        if (rowMin > max) return false;
+        [prev, cur] = [cur, prev];
+    }
+    return prev[b.length] <= max;
+}
+
+// Runs fn once the calls stop for `ms` (e.g. typing in Search re-renders once, not on every key).
+function debounce(fn, ms) {
+    let t = null;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+// Groups a list by key in one pass; groups keep the list order and appear in first-seen order.
+function groupBy(list, keyFn) {
+    const m = new Map();
+    for (const x of list) { const k = keyFn(x), g = m.get(k); if (g) g.push(x); else m.set(k, [x]); }
+    return m;
 }
 
 function toast(msg, type = 'ok') {

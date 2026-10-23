@@ -18,7 +18,7 @@ function openGuide() {
         <h4 class="font-bold text-slate-900 text-sm mb-1">Buckets</h4>
         <p class="mb-4"><b>Curing</b>: accounts that are past due but can still be brought current. <b>Recovery</b>: accounts that have already rolled, where the goal is to recover the balance. Provision figures always refer to the telecollector's accounts in that bucket.</p>
         <h4 class="font-bold text-slate-900 text-sm mb-1">How the provision columns relate</h4>
-        <p class="mb-1">Beginning ≥ To Retain. ACH % = Fixed Provision ÷ To Retain · Provision Variance = To Retain − Fixed Provision.</p>
+        <p class="mb-1">ACH % = Fixed Provision ÷ To Retain · Provision Variance = To Retain − Fixed Provision. Each figure has its own # of accounts, so To Retain can be more than Beginning, and Ending can be negative; the Excel import lists those rows for the Admin to verify before importing.</p>
         <p class="mb-4">While To Retain is blank, ACH %, the provision %, On Track Provision and Provision Variance show "—" and the KPI Rate leaves Provision out (the other weights are re-scaled).</p>
         <h4 class="font-bold text-slate-900 text-sm mb-1">KPI Rate</h4>
         <p class="mb-2">Each metric is scored as <b>actual ÷ target</b> (capped at ${num(cfg.cap)}%), then combined with the weights below. 100% = met every target. Leader (TL/OM/GM) KPI = average of their telecollectors' KPI, weighted by collectibles. Telecollectors with no figures yet are not ranked (shown as —).</p>

@@ -76,10 +76,12 @@ function companyRows(list, view = companyView, bucket = companyBucket) {
     let groups;
     if (view === 'campaign') {
         const l = bucket === 'all' ? list : list.filter(c => c.team === bucket);
-        groups = uniq(l.map(c => c.campaign)).sort().map(name => ({ label: name, list: l.filter(c => c.campaign === name) }));
+        groups = [...groupBy(l, c => c.campaign)].filter(([name]) => name).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([label, members]) => ({ label, list: members }));
         groups.push({ label: bucket === 'all' ? 'TOTAL' : `TOTAL ${bucket.toUpperCase()}`, list: l, total: true });
     } else {
-        groups = [['curing', 'CURING'], ['recovery', 'RECOVERY']].map(([team, label]) => ({ label, list: list.filter(c => c.team === team) })).filter(g => g.list.length);
+        const byTeam = groupBy(list, c => c.team);
+        groups = [['curing', 'CURING'], ['recovery', 'RECOVERY']].map(([team, label]) => ({ label, list: byTeam.get(team) || [] })).filter(g => g.list.length);
         groups.push({ label: 'COMPANY TOTAL', list, total: true });
     }
     const prog = bdProgress(effectiveAsOf());
